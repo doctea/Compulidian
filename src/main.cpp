@@ -23,7 +23,7 @@
     //#include "outputs/output_voice.h"
 #endif
 
-#define WAIT_FOR_SERIAL
+//#define WAIT_FOR_SERIAL
 
 #include "computer.h"
 
