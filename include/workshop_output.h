@@ -6,8 +6,10 @@
 #include "Drums.h"
 
 uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
-class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
+class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
   public:
+    bool debug = false;
+
     WorkshopOutputWrapper() {}
 
     int8_t get_output_number_for_note(uint8_t note) {
@@ -34,7 +36,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         if (output_number==-1)
             return;
 
-        Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
+        if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
 
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], HIGH);
@@ -54,7 +56,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         if (output_number==-1)
             return;
 
-        Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
+        if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
 
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], LOW);

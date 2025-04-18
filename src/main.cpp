@@ -10,6 +10,21 @@
 #include <clock.h>
 #include <bpm.h>
 
+#ifdef ENABLE_PARAMETERS
+  #include "ParameterManager.h"
+#endif
+
+#ifdef ENABLE_CV_INPUT
+    #include "cv_input.h"
+    #ifdef ENABLE_CLOCK_INPUT_CV
+        #include "cv_input_clock.h"
+    #endif
+
+    //#include "outputs/output_voice.h"
+#endif
+
+#define WAIT_FOR_SERIAL
+
 #include "computer.h"
 
 WorkshopOutputWrapper output_wrapper;
@@ -26,6 +41,8 @@ void setup_serial() {
 
   #ifdef WAIT_FOR_SERIAL
       while(!Serial) {};
+      //while (1)
+        //Serial.println(F("Serial started!"));
   #endif
 }
 
@@ -43,32 +60,45 @@ void global_on_restart() {
 void setup() {
   setup_serial();
 
+  for (int i = 1000 ; i >0 ; i--) {
+    Serial.print(i); Serial.flush();
+    delay(1);
+  }
+
+  Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
   SetupComputerIO();
+
+  Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
 
   setup_uclock(do_tick, uClock.PPQN_24);
   set_global_restart_callback(global_on_restart);
 
-  #ifdef ENABLE_PARAMETERS
-    #ifdef ENABLE_CV_INPUT
-        setup_cv_input();
-        Debug_printf("after setup_cv_input(), free RAM is\t%u\n", freeRam());
-
-        setup_parameter_inputs();
-        Debug_printf("after setup_parameter_inputs(), free RAM is\t%u\n", freeRam());
-    #endif
-    #ifdef ENABLE_CV_INPUT  // these are midi outputs!
-        setup_parameter_outputs(output_wrapper);
-        Debug_printf("after setup_parameter_outputs(), free RAM is\t%u\n", freeRam());
-    #endif
-    setup_output_processor_parameters();
-    Debug_printf("after setup_output_processor_parameters(), free RAM is\t%u\n", freeRam());
-  #endif
-
+  Serial.println(F("done setup_uclock()"));
+  
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
     setup_output(&output_wrapper);
     setup_sequencer();
     output_processor->configure_sequencer(sequencer);
+  #endif
+
+  #ifdef ENABLE_PARAMETERS
+    #ifdef ENABLE_CV_INPUT
+      Serial.println(F("setting up cv input..")); Serial.flush();
+      setup_cv_input();
+      Serial.println(F("..done setup_cv_input")); Serial.flush();
+      
+      Serial.println(F("setting up parameter inputs..")); Serial.flush();
+      setup_parameter_inputs();
+      Serial.println(F("..done setup_parameter_inputs")); Serial.flush();
+      Debug_printf("after setup_parameter_inputs(), free RAM is\t%u\n", freeRam());
+    #endif
+    /*#ifdef ENABLE_CV_INPUT  // these are midi outputs!
+        setup_parameter_outputs(output_wrapper);
+        Debug_printf("after setup_parameter_outputs(), free RAM is\t%u\n", freeRam());
+    #endif*/
+    setup_output_processor_parameters();
+    Debug_printf("after setup_output_processor_parameters(), free RAM is\t%u\n", freeRam());
   #endif
 
   #if defined(ENABLE_PARAMETERS)
@@ -147,6 +177,14 @@ void loop() {
           add_loop_length(micros()-mics_start);
       }
       */
+  }
+
+  if (cv_input_enabled) {
+    if (parameter_manager->ready_for_next_update()) {
+        //parameter_manager->process_calibration();
+
+        parameter_manager->throttled_update_cv_input__all(5, false, false);
+    }
   }
 
 }
