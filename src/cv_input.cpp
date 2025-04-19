@@ -111,7 +111,7 @@ void setup_parameter_inputs() {
     Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
     Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
     FloatParameter *euclidian_density = sequencer->getParameters()->get(0);
-    euclidian_density->debug = true;
+    //euclidian_density->debug = true;
     Serial.printf("got a pointer to euclidian_density %p\n", euclidian_density); Serial.flush();
     Serial.printf("got a pointer to euclidian_density %p\n", euclidian_density); Serial.flush();
     euclidian_density->set_slot_0_input(vpi1);
@@ -120,14 +120,14 @@ void setup_parameter_inputs() {
     euclidian_density->set_slot_1_amount(1.0f);
 
     FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(1);
-    euclidian_density_2->debug = true;
+    //euclidian_density_2->debug = true;
     euclidian_density->set_slot_0_input(vpi4);
     euclidian_density->set_slot_1_input(vpi5);
     euclidian_density->set_slot_0_amount(1.0f);
     euclidian_density->set_slot_1_amount(1.0f);
 
     FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
-    mutation_amount->debug = true;
+    //mutation_amount->debug = true;
     mutation_amount->set_slot_0_input(vpi3);
     mutation_amount->set_slot_1_input(vpi4);
     mutation_amount->set_slot_0_amount(1.0f);

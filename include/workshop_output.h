@@ -49,6 +49,14 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
                 pwm_set_gpio_level(CV_OUT_2+(output_number-2), 4096);
             }
         }
+
+        if (output_number>=0 && output_number<NUM_SAMPLES) {
+            Serial.printf("setting sample %i to play\n", output_number);
+            sample[output_number].sampleindex = 0; // reset sample index to start playing the sample
+            voice[output_number].sample = output_number; // set the sample to play
+            voice[output_number].sampleindex = 0;
+            //sample[output_number].play_volume = velocity; // set the velocity for the sample
+        }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
         int8_t output_number = get_output_number_for_note(pitch);
