@@ -1,6 +1,6 @@
 # Compulidian
 
-made a start porting my euclidian rhythm generator + modulation libraries to a Computer card 
+made a start porting my euclidean rhythm generator + modulation libraries to a Computer card 
 
 https://github.com/doctea/Compulidian / https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
 
