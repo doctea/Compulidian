@@ -3,6 +3,9 @@
 #include "computer.h"
 #include "outputs/output_processor.h"
 
+#include "samps.h"
+#include "audio.h"
+
 #include "Drums.h"
 
 uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "Cl.h"
 #include "Clap01.h"
 #include "Clhat01.h"
