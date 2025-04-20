@@ -58,6 +58,11 @@ void setup_samples() {
     } 
 }
 
+void dacWrite2(int channel, int value)
+{
+    uint16_t DAC_data = (!channel) ? (DAC_config_chan_A_gain | ((value) & 0xffff)) : (DAC_config_chan_B_gain | ((value) & 0xffff));
+    spi_write16_blocking(SPI_PORT, &DAC_data, 1);
+}
 
 void dacWrite(int lchan, int rchan) { 
     //lchan >>= 7;
@@ -109,6 +114,13 @@ void setup1() {
   
 }
   
+uint16_t dacval(int16_t value, uint16_t dacChannel)
+{
+    if (value<-2048) value = -2048;
+    if (value > 2047) value = 2047;
+    return (dacChannel | 0x3000) | (((uint16_t)((value & 0x0FFF) + 0x800)) & 0x0FFF);
+}
+
 // second core calculates samples and sends to DAC
 void loop1(){
     while (!started) {
@@ -160,12 +172,12 @@ void loop1(){
     #endif
    // write samples to DMA buffer - this is a blocking call so it stalls when buffer is full
       //DAC.write(int16_t(samplesum)); // left
-    //dacWrite(0, int(samplesum)); // left
-    //dacWrite(1, int(samplesum)); // left
+    dacWrite2(0, dacval(int(samplesum), DAC_CHANNEL_A)); // left
+    //dacWrite2(1, dacval(int(samplesum))); // left
   
     //Serial.println(samplesum);
   
-    dacWrite(samplesum, samplesum); // left and right
+    //dacWrite(samplesum, samplesum); // left and right
   
     //return;
     uint16_t ret;
