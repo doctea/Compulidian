@@ -25,7 +25,7 @@
 
 #define WAIT_FOR_SERIAL
 
-#include "computer.h"
+//#include "computer.h"
 
 WorkshopOutputWrapper output_wrapper;
 
@@ -57,7 +57,7 @@ void global_on_restart() {
 }
 
 
-void setup() {
+void setup1() {
   setup_serial();
 
   for (int i = 1000 ; i >0 ; i--) {
@@ -65,9 +65,9 @@ void setup() {
     delay(1);
   }
 
-  Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
-  SetupComputerIO();
-  Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
+  //Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
+  //SetupComputerIO();
+  //Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
 
   setup_samples();
 
@@ -151,7 +151,7 @@ void do_tick(uint32_t in_ticks) {
   #endif
 }
 
-void loop() {
+void loop1() {
 
   ATOMIC() 
   {
