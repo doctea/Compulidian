@@ -13,7 +13,7 @@ struct sample_t {
 
 extern sample_t sample[]; // array of samples
 
-#include "testkit/samples.h"
+#include "GMSamples/samples.h"
 
 //#define NUM_SAMPLES (sizeof(sample)/sizeof(sample_t)) 
 //extern sample_t sample[NUM_SAMPLES];
