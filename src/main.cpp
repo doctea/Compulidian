@@ -74,7 +74,7 @@ void setup() {
   setup_uclock(do_tick, uClock.PPQN_24);
   set_global_restart_callback(global_on_restart);
 
-  set_bpm(60);
+  //set_bpm(60);
 
   Serial.println(F("done setup_uclock()"));
   

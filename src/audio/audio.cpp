@@ -43,10 +43,40 @@ voice_t voice[NUM_VOICES] = {
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
 
-  10,    // default voice 7 assignment 
+  7,    // default voice 7 assignment 
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch 
+
+  8,    // default voice 8 assignment
+  250,   // level
+  0,    // sampleindex
+  4096, // initial pitch step - normal pitch
+
+  9,    // default voice 9 assignment
+  250,   // level
+  0,    // sampleindex
+  4096, // initial pitch step - normal pitch
+
+  10,    // default voice 10 assignment
+  250,   // level
+  0,    // sampleindex
+  4096, // initial pitch step - normal pitch
+
+  11,    // default voice 11 assignment
+  250,   // level
+  0,    // sampleindex
+  4096, // initial pitch step - normal pitch
+
+  12,    // default voice 12 assignment
+  250,   // level
+  0,    // sampleindex
+  4096, // initial pitch step - normal pitch
+  
+  13,    // default voice 13 assignment
+  250,   // level
+  0,    // sampleindex
+  4096 // initial pitch step - normal pitch
 };  
 
 
@@ -102,6 +132,8 @@ bool play_sound(__attribute__((unused)) repeating_timer_t *rt) {
   if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
   if  (samplesum<-32767) samplesum=-32767;
 
+  samplesum >>= 6;  // scale down to 12 bit range
+
   #ifdef MONITOR_CPU1  
       digitalWrite(CPU_USE,0); // low - CPU not busy
   #endif
@@ -147,7 +179,7 @@ void setup1() {
 }
 
 // second core calculates samples and sends to DAC
-void loop1(){
+void loop1() {
   while (!started) {
     if (Serial) Serial.println("loop1() - waiting to start");
     return;
@@ -155,6 +187,6 @@ void loop1(){
 
   #ifndef PLAY_SOUNDS_WITH_INTERRUPTS
     play_sound(NULL);
-    sleep_us(40);
+    sleep_us(80);
   #endif
 }

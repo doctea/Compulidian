@@ -33,11 +33,25 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         return -1;
     }
 
+    int8_t get_voice_number_for_note(uint8_t note) {
+        if (!is_valid_note(note))
+            return -1;
+
+        for (int i = 0 ; i < NUM_VOICES ; i++) {
+            if (sample[voice[i].sample].MIDINOTE == note) {
+                return i;
+            }
+        }
+
+        return -1;        
+    }
+
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+
         int8_t output_number = get_output_number_for_note(pitch);
 
-        if (output_number==-1)
-            return;
+        //if (output_number==-1)
+        //    return;
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
 
@@ -53,13 +67,37 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             }
         }
 
-        if (output_number>=0 && output_number<NUM_SAMPLES) {
+        int8_t voice_number = get_voice_number_for_note(pitch);
+        if (voice_number != -1) {
+            Serial.printf("setting sample %i to play\n", voice_number);
+            //sample[voice[voice_number].sample].sampleindex = 0; // reset sample index to start playing the sample
+            //voice[voice_number].sample = voice_number; // set the sample to play
+            voice[voice_number].sampleindex = 0;
+            //sample[voice_number].play_volume = velocity; // set the velocity for the sample
+        }
+
+        /*if (output_number>=0 && output_number<NUM_VOICES) {
             Serial.printf("setting sample %i to play\n", output_number);
-            sample[output_number].sampleindex = 0; // reset sample index to start playing the sample
+            //sample[voice[output_number].sample].sampleindex = 0; // reset sample index to start playing the sample
             voice[output_number].sample = output_number; // set the sample to play
             voice[output_number].sampleindex = 0;
             //sample[output_number].play_volume = velocity; // set the velocity for the sample
-        }
+        }*/
+       
+        /*for (int i = 0 ; i < NUM_VOICES ; i++) {
+            if (voice[i].sample >= NUM_SAMPLES) 
+                continue;
+            sample_t *sample = &sample[voice[i].sample];
+            Serial.printf("%i: sendNoteOn with pitch %i, checking against sample->MIDINOTE %i\n", i, pitch, sample->MIDINOTE);
+            if (sample->MIDINOTE == pitch) {
+                voice[i].sampleindex = 0; // reset sample index to start playing the sample
+                sample[i].sampleindex = 0;
+                voice[i].level = velocity; // set the velocity for the sample
+                voice[i].sampleincrement = 4096; // set the pitch step to normal
+                //voice[i].sample = output_number; // set the sample to play
+                break;
+            }
+        }*/
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
         int8_t output_number = get_output_number_for_note(pitch);
