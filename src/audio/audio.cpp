@@ -58,60 +58,10 @@ void setup_samples() {
     } 
 }
 
-void dacWrite2(int channel, int value)
+void dacWrite(int channel, int value)
 {
     uint16_t DAC_data = (!channel) ? (DAC_config_chan_A_gain | ((value) & 0xffff)) : (DAC_config_chan_B_gain | ((value) & 0xffff));
     spi_write16_blocking(SPI_PORT, &DAC_data, 1);
-}
-
-void dacWrite(int lchan, int rchan) { 
-    //lchan >>= 7;
-    //rchan >>= 7;
-
-    //Serial.printf("dacWrite(%i, %i)\n", lchan, rchan); Serial.flush();
-
-    uint16_t DAC_dataL = DAC_config_chan_A_gain | (lchan & 0xFFF);
-    uint16_t DAC_dataR = DAC_config_chan_B_gain | (rchan & 0xFFF);
-  
-    SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0)); // Start SPI transaction
-    digitalWrite(DAC_CS, LOW); // Select the SPI device
-  
-    SPI.transfer(DAC_dataL >> 8); // Send first byte
-    SPI.transfer(DAC_dataL & 0xFF); // Send second byte
-  
-    digitalWrite(DAC_CS, HIGH); // Deselect the SPI device
-    SPI.endTransaction(); // End SPI transaction
-  
-    SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0)); // Start SPI transaction
-    digitalWrite(DAC_CS, LOW); // Select the SPI device
-  
-    SPI.transfer(DAC_dataR >> 8); // Send first byte
-    SPI.transfer(DAC_dataR & 0xFF); // Send second byte
-  
-    digitalWrite(DAC_CS, HIGH); // Deselect the SPI device
-    SPI.endTransaction(); // End SPI transaction
-  
-}
-
-void setup1() {
-
-    while(!Serial) {}
-    /*for(int i = 0 ; i < 10 ; ++i) {
-      Serial.print("core1: "); Serial.print(i); Serial.println(); Serial.flush();
-      delay(1000);
-    }*/
-    
-    // Setup SPI
-    //SPI.setCS(DAC_CS);
-    SPI.begin(); // Initialize the SPI bus
-  
-    pinMode(DAC_CS, OUTPUT); // Set the Chip Select pin as an output
-    digitalWrite(DAC_CS, HIGH); // Deselect the SPI device to start
-  
-    //pass settings to SPI class
-    //SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0)); // Start SPI transaction
-    //SPI.endTransaction();
-  
 }
   
 uint16_t dacval(int16_t value, uint16_t dacChannel)
@@ -121,76 +71,65 @@ uint16_t dacval(int16_t value, uint16_t dacChannel)
     return (dacChannel | 0x3000) | (((uint16_t)((value & 0x0FFF) + 0x800)) & 0x0FFF);
 }
 
-// second core calculates samples and sends to DAC
-void loop1(){
-    while (!started) {
-      Serial.println("loop1() - waiting to start");
-      return;
-    } 
-    //Serial.println("loop1() - looped!");
-  
-    //Serial.println("loop1()");
-    //delay(500);
-  
-    //return;
-  
-    int32_t newsample,samplesum=0;
-    uint32_t index;
-    int16_t samp0,samp1,delta,tracksample;
-  
-   // oct 22 2023 resampling code
+void play_sound() { 
+  int32_t newsample,samplesum=0;
+  uint32_t index;
+  int16_t samp0,samp1,delta,tracksample;
+
+  // oct 22 2023 resampling code
   // to change pitch we step through the sample by .5 rate for half pitch up to 2 for double pitch
   // sample.sampleindex is a fixed point 20:12 fractional number
   // we step through the sample array by sampleincrement - sampleincrement is treated as a 1 bit integer and a 12 bit fraction
   // for sample lookup sample.sampleindex is converted to a 20 bit integer which limits the max sample size to 2**20 or about 1 million samples, about 45 seconds @22khz
-    // oct 24/2023 - scan through voices instead of sample array
-    // faster because there are only 8 voices vs typically 45 or more samples
-  
-    for (int track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up
-      tracksample=voice[track].sample; // precompute for a little more speed below
-      index=voice[track].sampleindex>>12; // get the integer part of the sample increment
-      if (index <= sample[tracksample].samplesize) { // if sample is playing, do interpolation   
-        //Serial.printf("track %i is playing sample %i\n", track, tracksample); Serial.flush();
-        samp0=sample[tracksample].samplearray[index]; // get the first sample to interpolate
-        samp1=sample[tracksample].samplearray[index+1];// get the second sample
-        delta=samp1-samp0;
-        newsample=(int32_t)samp0+((int32_t)delta*((int32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
-        samplesum+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
-        voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
-      }
+  // oct 24/2023 - scan through voices instead of sample array
+  // faster because there are only 8 voices vs typically 45 or more samples
+
+  for (int track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up
+    tracksample=voice[track].sample; // precompute for a little more speed below
+    index=voice[track].sampleindex>>12; // get the integer part of the sample increment
+    if (index <= sample[tracksample].samplesize) { // if sample is playing, do interpolation   
+      //Serial.printf("track %i is playing sample %i\n", track, tracksample); Serial.flush();
+      samp0=sample[tracksample].samplearray[index]; // get the first sample to interpolate
+      samp1=sample[tracksample].samplearray[index+1];// get the second sample
+      delta=samp1-samp0;
+      newsample=(int32_t)samp0+((int32_t)delta*((int32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
+      samplesum+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
+      voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
     }
+  }
   
+  samplesum=samplesum>>7;  // adjust for volume multiply above
+  if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
+  if  (samplesum<-32767) samplesum=-32767;
+
+  #ifdef MONITOR_CPU1  
+      digitalWrite(CPU_USE,0); // low - CPU not busy
+  #endif
+
+  dacWrite(0, dacval(int(samplesum), DAC_CHANNEL_A)); // left
+  dacWrite(1, dacval(int(samplesum), DAC_CHANNEL_B)); // right
   
-    samplesum=samplesum>>7;  // adjust for volume multiply above
-    if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
-    if  (samplesum<-32767) samplesum=-32767;
-  
-    //const uint16_t samplesum16 = DAC_config_chan_A_gain | (samplesum & 0xFFF); // convert to 16 bit signed int for DAC
-  
-    #ifdef MONITOR_CPU1  
-        digitalWrite(CPU_USE,0); // low - CPU not busy
-    #endif
-   // write samples to DMA buffer - this is a blocking call so it stalls when buffer is full
-      //DAC.write(int16_t(samplesum)); // left
-    dacWrite2(0, dacval(int(samplesum), DAC_CHANNEL_A)); // left
-    //dacWrite2(1, dacval(int(samplesum))); // left
-  
-    //Serial.println(samplesum);
-  
-    //dacWrite(samplesum, samplesum); // left and right
-  
-    //return;
-    uint16_t ret;
-  
-    /*hw_write_masked(&spi_get_hw(spi0)->cr0, (16 - 1) << SPI_SSPCR0_DSS_LSB, SPI_SSPCR0_DSS_BITS); // Fast set to 16-bits
-    spi_write16_read16_blocking(spi0, &samplesum16, &ret, 1);
-    hw_write_masked(&spi_get_hw(spi0)->cr0, (16 - 1) << SPI_SSPCR0_DSS_LSB, SPI_SSPCR0_DSS_BITS); // Fast set to 16-bits
-    spi_write16_read16_blocking(spi0, &samplesum16, &ret, 1);*/
-  
-  
-    #ifdef MONITOR_CPU1
-        digitalWrite(CPU_USE,1); // hi = CPU busy
-    #endif
+  #ifdef MONITOR_CPU1
+      digitalWrite(CPU_USE,1); // hi = CPU busy
+  #endif
 }
 
+void setup1() {
+  while(!Serial) {}
+  
+  // Setup SPI
+  SPI.begin(); // Initialize the SPI bus
 
+  pinMode(DAC_CS, OUTPUT); // Set the Chip Select pin as an output
+  digitalWrite(DAC_CS, HIGH); // Deselect the SPI device to start
+}
+
+// second core calculates samples and sends to DAC
+void loop1(){
+  while (!started) {
+    Serial.println("loop1() - waiting to start");
+    return;
+  }
+
+  play_sound();
+}
