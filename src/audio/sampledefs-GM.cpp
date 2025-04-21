@@ -1,7 +1,11 @@
-#include "GMSamples/sampledefs.h"
+
+#include "audio/samps.h"
+
+#if SAMPLESET==GM
+
+#include "audio/GMSamples/sampledefs.h"
 
 #include <Arduino.h>
-#include "samps.h"
 
 
 #define BASS2_SIZE (sizeof(Bass2)/sizeof(int16_t))
@@ -276,3 +280,5 @@ sample_t sample[] = {
 };
 
 const size_t NUM_SAMPLES = sizeof(sample) / sizeof(sample[0]);
+
+#endif

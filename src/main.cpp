@@ -5,7 +5,7 @@
 
 #include "workshop_output.h"
 
-#include "audio.h"
+#include "audio/audio.h"
 
 #include <clock.h>
 #include <bpm.h>

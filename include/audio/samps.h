@@ -2,6 +2,9 @@
 
 #include <Arduino.h>
 
+#define GM      1
+#define R808    2
+
 struct sample_t {
     const int16_t * samplearray; // pointer to sample array
     uint32_t samplesize; // size of the sample array
@@ -13,7 +16,11 @@ struct sample_t {
 
 extern sample_t sample[]; // array of samples
 
-#include "GMSamples/samples.h"
+#if SAMPLESET==GM
+    #include "GMSamples/samples.h"
+#elif SAMPLESET==R808
+    #include "808Samples/samples.h"
+#endif
 
 //#define NUM_SAMPLES (sizeof(sample)/sizeof(sample_t)) 
 //extern sample_t sample[NUM_SAMPLES];

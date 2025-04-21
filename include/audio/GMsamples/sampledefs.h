@@ -1,4 +1,5 @@
 
+/*
 // Copyright 2019 Rich Heslip
 //
 // Author: Rich Heslip 
@@ -65,7 +66,9 @@
 #define CABASA_SIZE (sizeof(Cabasa)/sizeof(int16_t))
 #define MARACAS_SIZE (sizeof(Maracas)/sizeof(int16_t))
 
-#include "samps.h"
+#include "audio/samps.h"
+
+*/
 
 // sample table holds the sample information
 /*
@@ -303,7 +306,7 @@ sample_t sample[] = { // fill it with default sample info
   127,       // play volume 0-127
   "Maracas",  // sample name    
 };
-*/
-
 
 #endif // SAMPLEDEFS_H_
+
+*/

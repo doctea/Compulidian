@@ -3,8 +3,8 @@
 #include "computer.h"
 #include "outputs/output_processor.h"
 
-#include "samps.h"
-#include "audio.h"
+#include "audio/samps.h"
+#include "audio/audio.h"
 
 #include "Drums.h"
 
