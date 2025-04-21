@@ -23,7 +23,7 @@
     //#include "outputs/output_voice.h"
 #endif
 
-#define WAIT_FOR_SERIAL
+//#define WAIT_FOR_SERIAL
 
 #include "computer.h"
 
@@ -60,10 +60,10 @@ void global_on_restart() {
 void setup() {
   setup_serial();
 
-  for (int i = 1000 ; i >0 ; i--) {
+  /*for (int i = 1000 ; i >0 ; i--) {
     Serial.print(i); Serial.flush();
     delay(1);
-  }
+  }*/
 
   Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
   SetupComputerIO();

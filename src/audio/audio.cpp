@@ -115,7 +115,7 @@ void play_sound() {
 }
 
 void setup1() {
-  while(!Serial) {}
+  //while(!Serial) {}
   
   // Setup SPI
   SPI.begin(); // Initialize the SPI bus
@@ -127,7 +127,7 @@ void setup1() {
 // second core calculates samples and sends to DAC
 void loop1(){
   while (!started) {
-    Serial.println("loop1() - waiting to start");
+    if (Serial) Serial.println("loop1() - waiting to start");
     return;
   }
 
