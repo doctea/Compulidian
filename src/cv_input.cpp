@@ -116,8 +116,8 @@ void setup_parameter_inputs() {
 
     FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(1);
     euclidian_density_2->debug = true;
-    euclidian_density_2->set_slot_0_input(vpi_cv_2);
-    //euclidian_density->set_slot_1_input(vpi_knob_x);
+    //euclidian_density_2->set_slot_0_input(vpi_cv_2);
+    euclidian_density_2->set_slot_1_input(vpi_knob_x);
     euclidian_density_2->set_slot_0_amount(1.0f);
     //euclidian_density->set_slot_1_amount(1.0f);
 
