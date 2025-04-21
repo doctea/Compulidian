@@ -102,13 +102,9 @@ void setup_parameter_inputs() {
 
     // todo: parameters that control Euclidian density, etc...
     Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
-    Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
-    Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
-    Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
+    
     FloatParameter *euclidian_density = sequencer->getParameters()->get(0);
     euclidian_density->debug = true;
-    Serial.printf("got a pointer to euclidian_density %p\n", euclidian_density); Serial.flush();
-    Serial.printf("got a pointer to euclidian_density %p\n", euclidian_density); Serial.flush();
     euclidian_density->set_slot_0_input(vpi_knob_main);
     //euclidian_density->set_slot_1_input(vpi_cv_1);
     euclidian_density->set_slot_0_amount(1.0f);
