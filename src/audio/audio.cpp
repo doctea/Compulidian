@@ -71,7 +71,7 @@ uint16_t dacval(int16_t value, uint16_t dacChannel)
     return (dacChannel | 0x3000) | (((uint16_t)((value & 0x0FFF) + 0x800)) & 0x0FFF);
 }
 
-void play_sound() { 
+bool play_sound(__attribute__((unused)) repeating_timer_t *rt) { 
   int32_t newsample,samplesum=0;
   uint32_t index;
   int16_t samp0,samp1,delta,tracksample;
@@ -112,8 +112,11 @@ void play_sound() {
   #ifdef MONITOR_CPU1
       digitalWrite(CPU_USE,1); // hi = CPU busy
   #endif
+
+  return true;
 }
 
+repeating_timer_t timer1;
 void setup1() {
   //while(!Serial) {}
   
@@ -122,6 +125,25 @@ void setup1() {
 
   pinMode(DAC_CS, OUTPUT); // Set the Chip Select pin as an output
   digitalWrite(DAC_CS, HIGH); // Deselect the SPI device to start
+
+  while (!started) {
+    if (Serial) Serial.println("loop1() - waiting to start");
+    return;
+  }
+  
+  #ifdef PLAY_SOUNDS_WITH_INTERRUPTS
+    bool v = add_repeating_timer_us(40, play_sound, NULL, &timer1); // 48kHz sample rate
+    if (!v) {
+      while (1) {
+        if (Serial) Serial.println("Failed to add repeating timer");
+        sleep_us(1000);
+      }
+    } else {
+      while (1) {
+        if (Serial) Serial.println("Added repeating timer");
+      }
+    }
+  #endif
 }
 
 // second core calculates samples and sends to DAC
@@ -131,5 +153,8 @@ void loop1(){
     return;
   }
 
-  play_sound();
+  #ifndef PLAY_SOUNDS_WITH_INTERRUPTS
+    play_sound(NULL);
+    sleep_us(40);
+  #endif
 }
