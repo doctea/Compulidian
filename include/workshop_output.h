@@ -47,6 +47,9 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
     }
 
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        #ifdef USE_TINYUSB
+            USBMIDI.sendNoteOn(pitch, velocity, channel);
+        #endif
         int8_t output_number = get_output_number_for_note(pitch);
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
         if (output_number>=0 && output_number<NUM_LEDS) {
@@ -69,13 +72,12 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        #ifdef USE_TINYUSB
+            USBMIDI.sendNoteOff(pitch, velocity, channel);
+        #endif
         int8_t output_number = get_output_number_for_note(pitch);
-        
-        if (output_number==-1)
-            return;
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], LOW);
 

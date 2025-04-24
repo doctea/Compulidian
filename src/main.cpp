@@ -60,10 +60,11 @@ void global_on_restart() {
 void setup() {
   setup_serial();
 
-  /*for (int i = 1000 ; i >0 ; i--) {
-    Serial.print(i); Serial.flush();
-    delay(1);
-  }*/
+  #ifdef USE_TINYUSB
+    Serial.println("setup_usb!"); Serial.flush();
+    setup_usb();
+    setup_midi();
+  #endif
 
   Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
   SetupComputerIO();
@@ -152,6 +153,12 @@ void do_tick(uint32_t in_ticks) {
 }
 
 void loop() {
+
+  #ifdef USE_TINYUSB
+    ATOMIC() {
+      USBMIDI.read();
+    }
+  #endif
 
   ATOMIC() 
   {
