@@ -58,29 +58,32 @@ void setup_parameter_inputs() {
     //Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
     tft_print("..setup_parameter_inputs...");
 
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(0, 0, 2, 10.0, false));
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(1, 0, 3, 10.0, false));
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(2, 1, 2, 10.0, false));
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(3, 1, 3, 10.0, false));
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(4, 2, 2, 10.0, false));
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(0, 0, 2, 5.0, false));    // main knob
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(1, 0, 3, 5.0, false));    // cv1
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(2, 1, 2, 5.0, false));    // knob x
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(3, 1, 3, 5.0, false));    // cv2
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(4, 2, 2, 5.0, false));    // knob y
 
     // initialise the voltage source inputs
+    // CVs are bipolar input, knobs are unipolar
     Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
-    VoltageParameterInput *vpi_knob_main = new VoltageParameterInput((char*)"Main", "CV Inputs", parameter_manager->voltage_sources->get(0));    
-    VoltageParameterInput *vpi_cv_1 = new VoltageParameterInput((char*)"CV1", "CV Inputs",       parameter_manager->voltage_sources->get(1));
+    VoltageParameterInput *vpi_knob_main = new VoltageParameterInput((char*)"Main", "CV Inputs", parameter_manager->voltage_sources->get(0), 0.005, UNIPOLAR, true);    
+    VoltageParameterInput *vpi_cv_1 = new VoltageParameterInput((char*)"CV1", "CV Inputs",       parameter_manager->voltage_sources->get(1), 0.005, UNIPOLAR);    
     Serial.println(F("==== begin setup_parameter_inputs 2====")); Serial_flush();
-    VoltageParameterInput *vpi_knob_x = new VoltageParameterInput((char*)"X", "CV Inputs",       parameter_manager->voltage_sources->get(2));
-    VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3));
+    VoltageParameterInput *vpi_knob_x = new VoltageParameterInput((char*)"X", "CV Inputs",       parameter_manager->voltage_sources->get(2), 0.005, UNIPOLAR, true);    
+    VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, UNIPOLAR);    
     Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
-    VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4));
+    VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.005, UNIPOLAR, true);    
     
-    parameter_manager->voltage_sources->get(0)->debug = true;
+    //parameter_manager->voltage_sources->get(0)->debug = true;
 
+    /*
     vpi_knob_main->debug = true;
     vpi_cv_1->debug = true;
     vpi_cv_2->debug = true;
     vpi_knob_x->debug = true;
     vpi_knob_y->debug = true;
+    */
 
     // tell the parameter manager about them
     parameter_manager->addInput(vpi_knob_main);
@@ -100,27 +103,29 @@ void setup_parameter_inputs() {
     parameter_manager->setDefaultParameterConnections();
     Serial.println("just did do setDefaultParameterConnections().."); Serial.flush();
 
-    // todo: parameters that control Euclidian density, etc...
-    Serial.printf("about to setup parameters for sequencer %p\n", sequencer); Serial.flush();
-    
     FloatParameter *euclidian_density = sequencer->getParameters()->get(0);
-    euclidian_density->debug = true;
+    //euclidian_density->debug = true;
     euclidian_density->set_slot_0_input(vpi_knob_main);
-    //euclidian_density->set_slot_1_input(vpi_cv_1);
     euclidian_density->set_slot_0_amount(1.0f);
-    //euclidian_density->set_slot_1_amount(1.0f);
+    euclidian_density->set_slot_0_polarity(UNIPOLAR);
+    euclidian_density->set_slot_1_input(vpi_cv_1);
+    euclidian_density->set_slot_1_amount(1.0f);
+    euclidian_density->set_slot_1_polarity(BIPOLAR);
 
     FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(1);
-    euclidian_density_2->debug = true;
-    //euclidian_density_2->set_slot_0_input(vpi_cv_2);
-    euclidian_density_2->set_slot_1_input(vpi_knob_x);
+    //euclidian_density_2->debug = true;
+    euclidian_density_2->set_slot_0_input(vpi_knob_x);
     euclidian_density_2->set_slot_0_amount(1.0f);
-    //euclidian_density->set_slot_1_amount(1.0f);
-
+    euclidian_density_2->set_slot_0_polarity(UNIPOLAR);
+    euclidian_density_2->set_slot_1_input(vpi_cv_2);
+    euclidian_density_2->set_slot_1_amount(1.0f);
+    euclidian_density_2->set_slot_1_polarity(BIPOLAR);
+        
     FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
     //mutation_amount->debug = true;
     mutation_amount->set_slot_0_input(vpi_knob_y);
     mutation_amount->set_slot_0_amount(1.0f);
+    mutation_amount->set_slot_0_polarity(UNIPOLAR);
 
     tft_print("Finished setup_parameter_inputs()\n");
 }
