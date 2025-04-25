@@ -80,7 +80,7 @@ sample_t sample[] = {
 	Oh00_SIZE,	// size of the sample array
 	Oh00_SIZE,	//sampleindex. if at end of sample array sound is not playing
 	GM_NOTE_PEDAL_HI_HAT,	// MIDI note on that plays this sample
-	127,	// play volume 0-127
+	64,	// play volume 0-127
 	"Oh00",	// sample name
   
 	Ma,	// pointer to sample array
