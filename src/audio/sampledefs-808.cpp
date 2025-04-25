@@ -62,12 +62,19 @@ sample_t sample[] = {
 	127,	// play volume 0-127
 	"Ch",	// sample name
 
-	Oh50,	// pointer to sample array
+	/*Oh50,	// pointer to sample array
 	Oh50_SIZE,	// size of the sample array
 	Oh50_SIZE,	//sampleindex. if at end of sample array sound is not playing
 	GM_NOTE_OPEN_HI_HAT,	// MIDI note on that plays this sample
-	127,	// play volume 0-127
-	"Oh50",	// sample name
+	64,	// play volume 0-127
+	"Oh50",	// sample name*/
+
+	Oh25,	// pointer to sample array
+	Oh25_SIZE,	// size of the sample array
+	Oh25_SIZE,	//sampleindex. if at end of sample array sound is not playing
+	GM_NOTE_OPEN_HI_HAT,	// MIDI note on that plays this sample
+	64,	// play volume 0-127
+	"Oh25",	// sample name
 
 	Oh00,	// pointer to sample array
 	Oh00_SIZE,	// size of the sample array

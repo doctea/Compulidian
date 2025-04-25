@@ -125,6 +125,7 @@ bool play_sound(__attribute__((unused)) repeating_timer_t *rt) {
       newsample=(int32_t)samp0+((int32_t)delta*((int32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
       samplesum+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
       voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
+      voice[track].level=sample[tracksample].play_volume; // set the volume for the sample
     }
   }
   
