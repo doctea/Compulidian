@@ -2,7 +2,7 @@
 
 #include <SPI.h>
 
-#define NUM_VOICES 8
+#define NUM_VOICES 14
 
 // DAC parameters
 //  A-channel, 1x, active

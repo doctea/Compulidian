@@ -3,8 +3,8 @@
 #include "computer.h"
 #include "outputs/output_processor.h"
 
-#include "samps.h"
-#include "audio.h"
+#include "audio/samps.h"
+#include "audio/audio.h"
 
 #include "Drums.h"
 
@@ -33,14 +33,25 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         return -1;
     }
 
+    int8_t get_voice_number_for_note(uint8_t note) {
+        if (!is_valid_note(note))
+            return -1;
+
+        for (int i = 0 ; i < NUM_VOICES ; i++) {
+            if (sample[voice[i].sample].MIDINOTE == note) {
+                return i;
+            }
+        }
+
+        return -1;        
+    }
+
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        #ifdef USE_TINYUSB
+            USBMIDI.sendNoteOn(pitch, velocity, channel);
+        #endif
         int8_t output_number = get_output_number_for_note(pitch);
-
-        if (output_number==-1)
-            return;
-
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], HIGH);
 
@@ -53,22 +64,20 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             }
         }
 
-        if (output_number>=0 && output_number<NUM_SAMPLES) {
-            Serial.printf("setting sample %i to play\n", output_number);
-            sample[output_number].sampleindex = 0; // reset sample index to start playing the sample
-            voice[output_number].sample = output_number; // set the sample to play
-            voice[output_number].sampleindex = 0;
-            //sample[output_number].play_volume = velocity; // set the velocity for the sample
+        int8_t voice_number = get_voice_number_for_note(pitch);
+        if (voice_number != -1) {
+            Serial.printf("setting sample %i to play\n", voice_number);
+            voice[voice_number].sampleindex = 0;
+            //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        #ifdef USE_TINYUSB
+            USBMIDI.sendNoteOff(pitch, velocity, channel);
+        #endif
         int8_t output_number = get_output_number_for_note(pitch);
-        
-        if (output_number==-1)
-            return;
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], LOW);
 
@@ -80,6 +89,8 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
                 pwm_set_gpio_level(CV_OUT_2+(output_number-2), 0);
             }
         }
+
+        // don't bother stopping sample playing for now
     }
 
 };

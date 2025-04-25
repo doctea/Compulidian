@@ -1,4 +1,4 @@
-#include "audio.h"
+#include "audio/audio.h"
 #include "computer.h"
 
 #include <atomic>
@@ -50,7 +50,7 @@ voice_t voice[NUM_VOICES] = {
 };  
 
 
-#include "samps.h"
+#include "audio/samps.h"
 
 void setup_samples() {
     for (int i=0; i< NUM_VOICES; ++i) { // silence all voices by setting sampleindex to last sample

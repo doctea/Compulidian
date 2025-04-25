@@ -5,7 +5,7 @@
 
 #include "workshop_output.h"
 
-#include "audio.h"
+#include "audio/audio.h"
 
 #include <clock.h>
 #include <bpm.h>
@@ -23,7 +23,7 @@
     //#include "outputs/output_voice.h"
 #endif
 
-#define WAIT_FOR_SERIAL
+//#define WAIT_FOR_SERIAL
 
 //#include "computer.h"
 
@@ -60,10 +60,11 @@ void global_on_restart() {
 void setup1() {
   setup_serial();
 
-  for (int i = 1000 ; i >0 ; i--) {
-    Serial.print(i); Serial.flush();
-    delay(1);
-  }
+  #ifdef USE_TINYUSB
+    Serial.println("setup_usb!"); Serial.flush();
+    setup_usb();
+    setup_midi();
+  #endif
 
   //Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
   //SetupComputerIO();
@@ -74,7 +75,7 @@ void setup1() {
   setup_uclock(do_tick, uClock.PPQN_24);
   set_global_restart_callback(global_on_restart);
 
-  set_bpm(60);
+  //set_bpm(60);
 
   Serial.println(F("done setup_uclock()"));
   
@@ -153,6 +154,12 @@ void do_tick(uint32_t in_ticks) {
 
 void loop1() {
 
+  #ifdef USE_TINYUSB
+    ATOMIC() {
+      USBMIDI.read();
+    }
+  #endif
+
   ATOMIC() 
   {
       ticked = update_clock_ticks();
@@ -189,5 +196,8 @@ void loop1() {
         parameter_manager->throttled_update_cv_input__all(5, false, false);
     }
   }
+
+  if (ticked)
+    parameter_manager->output_parameter_representation();
 
 }
