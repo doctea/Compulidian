@@ -33,8 +33,10 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 - Type `p <output name>` and press enter to trigger the pattern of that name (Kick, Stick, Clap, Snare, Cymbal 1, Tamb, HiTom, LoTom, PHH, OHH, CHH, Cymbal 2, Splash, Vibra, Ride Bell, Ride Cymbal)
 - Type `i` and press enter to toggle ParameterInput console display
 
-## future plans
+## Future plans
 
+- convert to a ComputerCard to take advantage of normalisation probes, better input reading, and better sound production
+- known problem: very lofi audio quality with bad aliasing problems
 - all the modulation possibilities need to be made to connect to sensible things, basic proof of concept atm
 - enable to slave to external CV clock and reset
 - send CV LFOs/envelopes instead of gates?
