@@ -146,12 +146,30 @@ void setup_parameter_inputs() {
     euclidian_density_2->set_slot_1_amount(1.0f);
     euclidian_density_2->set_slot_1_polarity(BIPOLAR);
         
+    /*
     FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
     //mutation_amount->debug = true;
     mutation_amount->set_slot_0_input(vpi_knob_y);
     mutation_amount->set_slot_0_amount(1.0f);
     mutation_amount->set_slot_0_polarity(UNIPOLAR);
+    */
 
+    LDataParameter<float> *bpm_parameter = new LDataParameter<float>(
+        (char*)"BPM", 
+        [=](float v) -> void {
+            // don't allow BPM to be set unless clock is internal
+            if (clock_mode == CLOCK_INTERNAL) {
+                set_bpm(v);
+            }
+        },
+        [=]() -> float { return get_bpm(); },                
+        30.0f, 240.0f
+    );
+    bpm_parameter->set_slot_0_input(vpi_knob_y);
+    bpm_parameter->set_slot_0_amount(1.0f);
+    bpm_parameter->set_slot_0_polarity(UNIPOLAR);
+    parameter_manager->addParameter(bpm_parameter);
+    
     tft_print("Finished setup_parameter_inputs()\n");
 }
 
