@@ -198,7 +198,7 @@ void loop() {
     }
   }
 
-  if (ticked)
-    parameter_manager->output_parameter_representation();
+  //if (ticked)
+  //  parameter_manager->output_parameter_representation();
 
 }
