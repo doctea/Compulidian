@@ -1,3 +1,5 @@
+#include "Config.h"
+
 #include "audio/audio.h"
 #include "computer.h"
 
