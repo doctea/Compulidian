@@ -7,7 +7,11 @@
 
 #include "ParameterManager.h"
 
+#include "workshop_output.h"
+
 ParameterManager *parameter_manager = new ParameterManager(LOOP_LENGTH_TICKS);
+
+extern WorkshopOutputWrapper output_wrapper;
 
 #ifdef ENABLE_CV_INPUT
 
@@ -78,7 +82,12 @@ void setup_parameter_inputs() {
     VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.005, UNIPOLAR, true);    
 
     //VoltageParameterInput *vpi_switch = new VoltageParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, false);    
-    ThresholdToggleParameterInput *vpi_hold_switch = new ThresholdToggleParameterInput((char*)"Hold", "CV Inputs",    parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, true,
+    ThresholdToggleParameterInput *vpi_hold_switch = new ThresholdToggleParameterInput(
+        (char*)"Hold", "CV Inputs",    
+        parameter_manager->voltage_sources->get(5), 
+        0.005, 
+        UNIPOLAR, 
+        true,
         -0.4, // under 0.4, switch is HELD
         [=](bool state) -> void { 
             Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
@@ -89,10 +98,16 @@ void setup_parameter_inputs() {
             Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
         }
     ); 
-    ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, true, 
+    ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput(
+        (char*)"Switch", "CV Inputs",  parameter_manager
+        ->voltage_sources->get(5), 
+        0.005, 
+        UNIPOLAR, 
+        true, 
         0.7, // over 0.7, switch is MOMENTARY
         [=](bool state) -> void { Serial.
             printf("Momentary switch %s\n", state ? "ON" : "OFF"); 
+            output_wrapper.set_muted(state);
         }
     ); 
     

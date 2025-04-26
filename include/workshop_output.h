@@ -7,13 +7,22 @@
 #include "audio/audio.h"
 
 #include "Drums.h"
-
-uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
+
+  uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
+
   public:
+    bool muted = false;
     bool debug = false;
 
     WorkshopOutputWrapper() {}
+
+    void set_muted(bool muted) {
+        this->muted = muted;
+    }
+    bool is_muted() {
+        return this->muted;
+    }
 
     int8_t get_output_number_for_note(uint8_t note) {
         switch(note) {
@@ -47,20 +56,30 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
     }
 
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        if (this->muted) {
+            return;
+        }
         #ifdef USE_TINYUSB
             USBMIDI.sendNoteOn(pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
         if (debug)
+            // this oddly crashes!
             if (Serial) { 
-                // this oddly sporadically crashes?
-                Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-                Serial.flush();
-                //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) aka %s to output_number %i\n", pitch, velocity, channel, get_note_name_c(pitch, channel), output_number);
+                //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
                 //Serial.flush();
+                ATOMIC() {
+                    //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) aka %s to output_number %i\n", pitch, velocity, channel, get_note_name_c(pitch, channel), output_number);
+                    Serial.printf("WorkshopOutputTarget::sendNoteOn(");
+                    Serial.printf("%i, ", pitch);
+                    Serial.printf("%i, ", velocity);
+                    Serial.printf("%i) aka ", channel);
+                    Serial.printf("%s ", get_note_name_c(pitch, channel));
+                    Serial.printf("to output_number %i\n", output_number);
+                }
             }
 
-        if (output_number>=0 && output_number<NUM_LEDS) {
+        if (channel==GM_CHANNEL_DRUMS && output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], HIGH);
 
             if (output_number == 0 || output_number == 1) {
@@ -73,7 +92,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         }
 
         int8_t voice_number = get_voice_number_for_note(pitch);
-        if (voice_number != -1) {
+        if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
             //Serial.printf("setting sample %i to play\n", voice_number);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
@@ -86,7 +105,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         int8_t output_number = get_output_number_for_note(pitch);
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-        if (output_number>=0 && output_number<NUM_LEDS) {
+        if (channel==GM_CHANNEL_DRUMS && output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], LOW);
 
             if (output_number == 0 || output_number == 1) {
