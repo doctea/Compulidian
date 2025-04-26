@@ -23,6 +23,7 @@ ParameterManager *parameter_manager = new ParameterManager(LOOP_LENGTH_TICKS);
 #include "voltage_sources/PicoSDKADCVoltageSource.h"
 
 #include "parameter_inputs/VirtualParameterInput.h"
+#include "parameter_inputs/ThresholdToggleParameterInput.h"
 
 #include "sequencer/sequencing.h"
 
@@ -63,6 +64,7 @@ void setup_parameter_inputs() {
     parameter_manager->addVoltageSource(new WorkshopVoltageSource(2, 1, 2, 5.0, false));    // knob x
     parameter_manager->addVoltageSource(new WorkshopVoltageSource(3, 1, 3, 5.0, false));    // cv2
     parameter_manager->addVoltageSource(new WorkshopVoltageSource(4, 2, 2, 5.0, false));    // knob y
+    parameter_manager->addVoltageSource(new WorkshopVoltageSource(5, 3, 2, 5.0, false));    // switch ?
 
     // initialise the voltage source inputs
     // CVs are bipolar input, knobs are unipolar
@@ -74,6 +76,25 @@ void setup_parameter_inputs() {
     VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, UNIPOLAR);    
     Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
     VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.005, UNIPOLAR, true);    
+
+    //VoltageParameterInput *vpi_switch = new VoltageParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, false);    
+    ThresholdToggleParameterInput *vpi_hold_switch = new ThresholdToggleParameterInput((char*)"Hold", "CV Inputs",    parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, true,
+        -0.4, // under 0.4, switch is HELD
+        [=](bool state) -> void { 
+            Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
+            if (!state) {
+                Serial.printf("Hold switch going OFF - seed was %u\n", sequencer->get_euclidian_seed());
+            }
+            sequencer->set_euclidian_seed_lock(state);
+            Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
+        }
+    ); 
+    ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, true, 
+        0.7, // over 0.7, switch is MOMENTARY
+        [=](bool state) -> void { Serial.
+            printf("Momentary switch %s\n", state ? "ON" : "OFF"); 
+        }
+    ); 
     
     //parameter_manager->voltage_sources->get(0)->debug = true;
 
@@ -91,6 +112,8 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(vpi_knob_x);
     parameter_manager->addInput(vpi_cv_2);
     parameter_manager->addInput(vpi_knob_y);
+    parameter_manager->addInput(vpi_hold_switch);
+    parameter_manager->addInput(vpi_mome_switch);
 
     /*VirtualParameterInput *virtpi1 = new VirtualParameterInput((char*)"LFO sync", "LFOs", LFO_LOCKED);
     VirtualParameterInput *virtpi2 = new VirtualParameterInput((char*)"LFO free", "LFOs", LFO_FREE);
@@ -99,9 +122,11 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(virtpi2);
     parameter_manager->addInput(virtpi3);*/
 
+    /*
     Serial.println("about to do setDefaultParameterConnections().."); Serial.flush();
     parameter_manager->setDefaultParameterConnections();
     Serial.println("just did do setDefaultParameterConnections().."); Serial.flush();
+    */
 
     FloatParameter *euclidian_density = sequencer->getParameters()->get(0);
     //euclidian_density->debug = true;

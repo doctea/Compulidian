@@ -51,7 +51,15 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             USBMIDI.sendNoteOn(pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
-        if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
+        if (debug)
+            if (Serial) { 
+                // this oddly sporadically crashes?
+                Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
+                Serial.flush();
+                //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) aka %s to output_number %i\n", pitch, velocity, channel, get_note_name_c(pitch, channel), output_number);
+                //Serial.flush();
+            }
+
         if (output_number>=0 && output_number<NUM_LEDS) {
             digitalWrite(leds_map[output_number], HIGH);
 
@@ -66,7 +74,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (voice_number != -1) {
-            Serial.printf("setting sample %i to play\n", voice_number);
+            //Serial.printf("setting sample %i to play\n", voice_number);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         }

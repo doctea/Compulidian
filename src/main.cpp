@@ -112,7 +112,8 @@ void setup() {
   #endif
 
   #ifdef ENABLE_PARAMETERS
-    parameter_manager->setDefaultParameterConnections();
+    //parameter_manager->setDefaultParameterConnections();
+    // ^^ don't do this here, as it will overwrite the connections made in setup_parameter_inputs()
   #endif
 
   #ifdef USE_UCLOCK
