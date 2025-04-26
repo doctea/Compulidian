@@ -160,7 +160,7 @@ void setup1() {
   digitalWrite(DAC_CS, HIGH); // Deselect the SPI device to start
 
   while (!started) {
-    if (Serial) Serial.println("loop1() - waiting to start");
+    //if (Serial) Serial.println("loop1() - waiting to start");
     return;
   }
   
@@ -183,11 +183,14 @@ void setup1() {
 void loop1() {
   while (!started) {
     if (Serial) Serial.println("loop1() - waiting to start");
+    #ifdef WAIT_FOR_SERIAL
+      delay(500);
+    #endif
     return;
   }
 
   #ifndef PLAY_SOUNDS_WITH_INTERRUPTS
     play_sound(NULL);
-    sleep_us(80);
+    sleep_us(40);
   #endif
 }

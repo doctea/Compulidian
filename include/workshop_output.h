@@ -24,6 +24,38 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         return this->muted;
     }
 
+    void reset() {
+        all_gates_off();
+        all_leds_on();
+        delay(50);
+        all_leds_off();
+    }
+
+    void all_leds_on() {
+        for (int i = 0 ; i < NUM_LEDS ; i++) {
+            digitalWrite(leds_map[i], HIGH);
+        }
+    }
+    void all_leds_off() {
+        for (int i = 0 ; i < NUM_LEDS ; i++) {
+            digitalWrite(leds_map[i], LOW);
+        }
+    }
+    void all_gates_off() {
+        for (int i = 0 ; i < NUM_LEDS ; i++) {
+            gateWrite(i, LOW);
+        }
+    }
+
+    // output to Pulse1+2 outputs and CV1+2 outputs
+    void gateWrite(int output_number, bool value) {
+        if (output_number == 0 || output_number == 1) {
+            digitalWrite(PULSE_1_RAW_OUT+output_number, value ? HIGH : LOW);
+        } else if (output_number == 2 || output_number == 3) {
+            pwm_set_gpio_level(CV_OUT_2+(output_number-2), value ? 4096 : 0);
+        }
+    }
+
     int8_t get_output_number_for_note(uint8_t note) {
         switch(note) {
             case GM_NOTE_ACOUSTIC_BASS_DRUM: case GM_NOTE_ELECTRIC_BASS_DRUM:
@@ -38,6 +70,12 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
                 return 4;
             case GM_NOTE_CRASH_CYMBAL_1: case GM_NOTE_CRASH_CYMBAL_2:
                 return 5;
+            case GM_NOTE_HAND_CLAP:
+                return 6;
+            case GM_NOTE_SIDE_STICK:
+                return 7;
+            case GM_NOTE_TAMBOURINE:
+                return 8;
         }
         return -1;
     }
@@ -79,21 +117,15 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
                 }
             }
 
-        if (channel==GM_CHANNEL_DRUMS && output_number>=0 && output_number<NUM_LEDS) {
-            digitalWrite(leds_map[output_number], HIGH);
+        if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
+            digitalWrite(leds_map[output_number % NUM_LEDS], HIGH);
 
-            if (output_number == 0 || output_number == 1) {
-                digitalWrite(PULSE_1_RAW_OUT+output_number, HIGH);
-            } else if (output_number == 2 || output_number == 3) {
-                //digitalWrite(CV_OUT_1+(output_number-2), HIGH); // set CV out high
-                //pwm_set_chan_level(0, output_number-2, 1024);
-                pwm_set_gpio_level(CV_OUT_2+(output_number-2), 4096);
-            }
+            gateWrite(output_number, HIGH);
         }
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            //Serial.printf("setting sample %i to play\n", voice_number);
+            Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         }
@@ -105,16 +137,10 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
         int8_t output_number = get_output_number_for_note(pitch);
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-        if (channel==GM_CHANNEL_DRUMS && output_number>=0 && output_number<NUM_LEDS) {
-            digitalWrite(leds_map[output_number], LOW);
+        if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
+            digitalWrite(leds_map[output_number % NUM_LEDS], LOW);
 
-            if (output_number == 0 || output_number == 1) {
-                digitalWrite(PULSE_1_RAW_OUT+output_number, LOW);
-            } else if (output_number == 2 || output_number == 3) {
-                //digitalWrite(CV_OUT_1+(output_number-2), HIGH); // set CV out low
-                //pwm_set_chan_level(0, output_number-2, 0);
-                pwm_set_gpio_level(CV_OUT_2+(output_number-2), 0);
-            }
+            gateWrite(output_number, LOW);
         }
 
         // don't bother stopping sample playing for now

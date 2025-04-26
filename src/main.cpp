@@ -1,10 +1,11 @@
+#include "Config.h"
+
 #include <Arduino.h>
 
 #include "sequencer/sequencing.h"
 #include "outputs/output_processor.h"
 
 #include "workshop_output.h"
-
 #include "audio/audio.h"
 
 #include <clock.h>
@@ -19,11 +20,7 @@
     #ifdef ENABLE_CLOCK_INPUT_CV
         #include "cv_input_clock.h"
     #endif
-
-    //#include "outputs/output_voice.h"
 #endif
-
-//#define WAIT_FOR_SERIAL
 
 #include "computer.h"
 
@@ -31,6 +28,8 @@ WorkshopOutputWrapper output_wrapper;
 
 std::atomic<bool> started = false;
 std::atomic<bool> ticked = false;
+
+bool debug_enable_output_parameter_input = false;
 
 void do_tick(uint32_t ticks);
 
@@ -43,6 +42,7 @@ void setup_serial() {
       while(!Serial) {};
       //while (1)
         //Serial.println(F("Serial started!"));
+      delay(500);
   #endif
 }
 
@@ -70,6 +70,8 @@ void setup() {
   SetupComputerIO();
   Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
 
+  output_wrapper.reset();
+
   setup_samples();
 
   setup_uclock(do_tick, uClock.PPQN_24);
@@ -81,9 +83,14 @@ void setup() {
   
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
-    setup_output(&output_wrapper);
+    //setup_output(&output_wrapper);
+    //output_processor = new FullDrumKitMIDIOutputProcessor(&output_wrapper);
+    //output_processor = new HalfDrumKitMIDIOutputProcessor(&output_wrapper);
+    output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
     setup_sequencer();
     output_processor->configure_sequencer(sequencer);
+    sequencer->initialise_patterns();
+    sequencer->reset_patterns();
   #endif
 
   #ifdef ENABLE_PARAMETERS
@@ -153,6 +160,56 @@ void do_tick(uint32_t in_ticks) {
   #endif
 }
 
+char serial_input_buffer[100];
+char serial_input_buffer_index = 0;
+void process_serial_input() {
+  //Serial.println(F("process_serial_input()"));
+  while (Serial.available()) {
+    char c = Serial.read();
+    //if(c=='\r') continue; // ignore carriage return
+
+    if (serial_input_buffer_index >= sizeof(serial_input_buffer)-1) {
+      Serial.printf("serial_input_buffer overflow, resetting\n");
+      serial_input_buffer_index = 0;
+    }
+
+    // handle backspace
+    if (c=='\b') {
+      Serial.printf("backspace?");
+      if (serial_input_buffer_index > 0) {
+        serial_input_buffer_index--;
+        Serial.printf("\b");
+      }
+    } else if (c=='\t') {
+      // recall previous command
+      serial_input_buffer_index = strlen(serial_input_buffer);
+      Serial.printf("\n%s", serial_input_buffer);
+    } else if (c=='\r' || c=='\n' || c=='#') {
+      serial_input_buffer[serial_input_buffer_index] = 0;
+      Serial.printf("\ngot '%s'\n", serial_input_buffer);
+      if (serial_input_buffer[0]=='p') {
+        Serial.println(F("p command received!"));
+        for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
+          if (p->get_output()->matches_label(serial_input_buffer+2)) {
+            Serial.printf("Triggering pattern %i: %s\n", i, p->get_output_label());
+            p->trigger_on_for_step(BPM_CURRENT_STEP_OF_PHRASE);
+          } /*else {
+            Serial.printf("pattern %i: null\n", i);
+          }*/
+        } 
+      } else if (serial_input_buffer[0]=='I') {
+        Serial.println(F("I command received!"));
+        debug_enable_output_parameter_input = !debug_enable_output_parameter_input;
+      }
+      serial_input_buffer_index = 0;
+    } else {
+      serial_input_buffer[serial_input_buffer_index++] = c;
+      Serial.printf("%c", c);  
+    }
+  }
+}
+
 void loop() {
 
   #ifdef USE_TINYUSB
@@ -168,26 +225,9 @@ void loop() {
 
   ATOMIC() 
   {
-      /*if (playing && clock_mode==CLOCK_INTERNAL && last_ticked_at_micros>0 && micros() + loop_average >= last_ticked_at_micros + micros_per_tick) {
-          // don't process anything else this loop, since we probably don't have time before the next tick arrives
-          //Serial.printf("early return because %i + %i >= %i + %i\n", micros(), loop_average, last_ticked_at_micros, micros_per_tick);
-          //Serial.flush();
-      } else {*/
-          if (output_processor->is_enabled()) {
-              output_processor->loop();
-          }
-      /*
-          #ifdef ENABLE_SCREEN
-          if (!is_locked()) {
-              //acquire_lock();
-              menu->update_inputs();
-              //release_lock();
-          }
-          #endif
-
-          add_loop_length(micros()-mics_start);
-      }
-      */
+    if (output_processor->is_enabled()) {
+        output_processor->loop();
+    }
   }
 
   if (cv_input_enabled) {
@@ -196,9 +236,21 @@ void loop() {
 
         parameter_manager->throttled_update_cv_input__all(5, false, false);
     }
+
+    if (ticked && debug_enable_output_parameter_input) 
+      parameter_manager->output_parameter_representation();
+
+    //if (ticked) sequencer->output_trigger_representation();
   }
 
-  //if (ticked)
-  //  parameter_manager->output_parameter_representation();
+  //if (ticked) 
+  process_serial_input();
+
+  // flash LEDs on the beat if muted
+  if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks)) {
+    output_wrapper.all_leds_on();
+  } else if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks,6)) {
+    output_wrapper.all_leds_off();
+  }
 
 }

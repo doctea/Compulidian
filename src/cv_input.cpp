@@ -1,4 +1,4 @@
-//#include "Config.h"
+#include "Config.h"
 
 #include "clock.h"
 #include "bpm.h"
@@ -178,7 +178,7 @@ void setup_parameter_inputs() {
             }
         },
         [=]() -> float { return get_bpm(); },                
-        30.0f, 240.0f
+        KNOB_MIN_BPM, KNOB_MAX_BPM
     );
     bpm_parameter->set_slot_0_input(vpi_knob_y);
     bpm_parameter->set_slot_0_amount(1.0f);

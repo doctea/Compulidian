@@ -34,12 +34,14 @@ sample_t sample[] = {
 	127,	// play volume 0-127
 	"Rs",	// sample name
 
+	/*
 	Hc75,	// pointer to sample array
 	Hc75_SIZE,	// size of the sample array
 	Hc75_SIZE,	//sampleindex. if at end of sample array sound is not playing
 	GM_NOTE_HAND_CLAP,	// MIDI note on that plays this sample
 	127,	// play volume 0-127
 	"Hc75",	// sample name
+	*/
 
 	Sd0010,	// pointer to sample array
 	Sd0010_SIZE,	// size of the sample array
@@ -145,14 +147,14 @@ sample_t sample[] = {
 	Cl,	// pointer to sample array
 	Cl_SIZE,	// size of the sample array
 	Cl_SIZE,	//sampleindex. if at end of sample array sound is not playing
-	GM_NOTE_HAND_CLAP,	// MIDI note on that plays this sample
+	GM_NOTE_CLAVES,	// MIDI note on that plays this sample
 	127,	// play volume 0-127
 	"Cl",	// sample name
 
 	Cp,	// pointer to sample array
 	Cp_SIZE,	// size of the sample array
 	Cp_SIZE,	//sampleindex. if at end of sample array sound is not playing
-	41,	// MIDI note on that plays this sample
+	GM_NOTE_HAND_CLAP,	// MIDI note on that plays this sample
 	127,	// play volume 0-127
 	"Cp",	// sample name
 
