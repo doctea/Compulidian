@@ -12,71 +12,85 @@ voice_t voice[NUM_VOICES] = {
   250,  // initial level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
   
   1,      // default voice 1 assignment 
   250,
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  1,    // right channel
 
   2,    // default voice 2 assignment 
   250, // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
 
   3,    // default voice 3 assignment 
   250, // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  1,    // right channel
 
   4,    // default voice 4 assignment 
   250,  // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
 
   5,    // default voice 5 assignment 
   250,  // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  1,    // right channel
 
   6,    // default voice 6 assignment 
   250,  // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
 
   7,    // default voice 7 assignment 
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch 
+  1,    // right channel
 
   8,    // default voice 8 assignment
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
 
   9,    // default voice 9 assignment
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  1,    // right channel
 
   10,    // default voice 10 assignment
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
 
   11,    // default voice 11 assignment
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  1,    // right channel
 
   12,    // default voice 12 assignment
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
+  0,    // left channel
   
   13,    // default voice 13 assignment
   250,   // level
   0,    // sampleindex
-  4096 // initial pitch step - normal pitch
+  4096, // initial pitch step - normal pitch
+  1,    // right channel
 };  
 
 
@@ -102,7 +116,7 @@ uint16_t dacval(int16_t value, uint16_t dacChannel)
 }
 
 bool play_sound(__attribute__((unused)) repeating_timer_t *rt) { 
-  int32_t newsample,samplesum=0;
+  int32_t newsample,samplesum_l=0,samplesum_r=0;
   uint32_t index;
   int16_t samp0,samp1,delta,tracksample;
 
@@ -123,24 +137,33 @@ bool play_sound(__attribute__((unused)) repeating_timer_t *rt) {
       samp1=sample[tracksample].samplearray[index+1];// get the second sample
       delta=samp1-samp0;
       newsample=(int32_t)samp0+((int32_t)delta*((int32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
-      samplesum+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
+      if (voice[track].channel==0) { // left channel
+        samplesum_l+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
+      } else { // right channel
+        samplesum_r+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
+      }
+      samplesum_l+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
       voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
       voice[track].level=sample[tracksample].play_volume; // set the volume for the sample
     }
   }
   
-  samplesum=samplesum>>7;  // adjust for volume multiply above
-  if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
-  if  (samplesum<-32767) samplesum=-32767;
-
-  samplesum >>= 6;  // scale down to 12 bit range
+  samplesum_l=samplesum_l>>7;  // adjust for volume multiply above
+  if  (samplesum_l>32767) samplesum_l=32767; // clip if sample sum is too large
+  if  (samplesum_l<-32767) samplesum_l=-32767;
+  samplesum_l >>= 6;  // scale down to 12 bit range
+  
+  samplesum_r=samplesum_r>>7;  // adjust for volume multiply above
+  if  (samplesum_r>32767) samplesum_r=32767; // clip if sample sum is too large
+  if  (samplesum_r<-32767) samplesum_r=-32767;
+  samplesum_r >>= 6;  // scale down to 12 bit range
 
   #ifdef MONITOR_CPU1  
       digitalWrite(CPU_USE,0); // low - CPU not busy
   #endif
 
-  dacWrite(0, dacval(int(samplesum), DAC_CHANNEL_A)); // left
-  dacWrite(1, dacval(int(samplesum), DAC_CHANNEL_B)); // right
+  dacWrite(0, dacval(int(samplesum_l), DAC_CHANNEL_A)); // left
+  dacWrite(1, dacval(int(samplesum_r), DAC_CHANNEL_B)); // right
   
   #ifdef MONITOR_CPU1
       digitalWrite(CPU_USE,1); // hi = CPU busy

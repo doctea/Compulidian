@@ -18,6 +18,7 @@ struct voice_t {
     int16_t level;   // 0-1000 for legacy reasons
     volatile uint32_t sampleindex; // 20:12 fixed point index into the sample array
     uint16_t sampleincrement; // 1:12 fixed point sample step for pitch changes 
+    uint8_t channel; // 0=left, 1=right
 };
 
 extern voice_t voice[NUM_VOICES];
