@@ -49,6 +49,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
     // output to Pulse1+2 outputs and CV1+2 outputs
     void gateWrite(int output_number, bool value) {
+        value = !value; // invert the value for the gate outputs
         if (output_number == 0 || output_number == 1) {
             digitalWrite(PULSE_1_RAW_OUT+output_number, value ? HIGH : LOW);
         } else if (output_number == 2 || output_number == 3) {
