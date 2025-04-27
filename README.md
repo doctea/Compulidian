@@ -31,7 +31,7 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 
 - Connect via serial to access debug console.
 - Type `p <output name>` and press enter to trigger the pattern of that name (Kick, Stick, Clap, Snare, Cymbal 1, Tamb, HiTom, LoTom, PHH, OHH, CHH, Cymbal 2, Splash, Vibra, Ride Bell, Ride Cymbal)
-- Type `i` and press enter to toggle ParameterInput console display
+- Type `I` and press enter to toggle ParameterInput console display
 
 ## Future plans
 
