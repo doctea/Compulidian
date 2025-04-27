@@ -23,6 +23,7 @@
 #endif
 
 #include "computer.h"
+#include "webusb/webusb.h"
 
 WorkshopOutputWrapper output_wrapper;
 
@@ -57,6 +58,24 @@ void global_on_restart() {
 }
 
 
+void line_state_callback(bool connected) {
+  // connected = green, disconnected = red
+  if (connected) {
+    Serial.println(F("WebUSB connected!"));
+    //digitalWrite(LED_BUILTIN, HIGH);
+  } else {
+    Serial.println(F("WebUSB disconnected!"));
+    //digitalWrite(LED_BUILTIN, LOW);
+  }
+}
+
+void setup_webusb() {
+  //usb_web.setStringDescriptor("TinyUSB WebUSB");
+  usb_web.setLandingPage(&landingPage);
+  usb_web.setLineStateCallback(line_state_callback);
+  usb_web.begin();
+}
+
 void setup() {
   setup_serial();
 
@@ -65,6 +84,8 @@ void setup() {
     setup_usb();
     setup_midi();
   #endif
+
+  setup_webusb();
 
   Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
   SetupComputerIO();
@@ -216,6 +237,22 @@ void loop() {
     ATOMIC() {
       USBMIDI.read();
     }
+    //ATOMIC() {
+      if (usb_web.connected()) {
+        process_usb_web();
+        /*uint8_t buffer[512];
+        while (usb_web.available()) {
+          size_t len = usb_web.read(buffer, (size_t)sizeof(buffer));
+          if (len > 0) {
+            Serial.printf("WebUSB read %u bytes: ", len);
+            for (size_t i = 0; i < len; i++) {
+              Serial.printf("%c", buffer[i]);
+            }
+            Serial.println();
+          }
+        }*/
+      }
+    //}
   #endif
 
   ATOMIC() 
