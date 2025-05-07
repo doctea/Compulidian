@@ -203,6 +203,7 @@ void process_serial_input() {
       } else if (serial_input_buffer[0]=='I') {
         Serial.println(F("I command received!"));
         debug_enable_output_parameter_input = !debug_enable_output_parameter_input;
+
       } else if (serial_input_buffer[0]=='d' || serial_input_buffer[0]=='D') {
         Serial.println(F("d command received!"));
         if (serial_input_buffer[1]=='p') {
@@ -242,11 +243,12 @@ void process_serial_input() {
         Serial.println("Finished parsing serial input");
         break;
       }
+      serial_input_buffer_index = 0;
     } else {
       serial_input_buffer[serial_input_buffer_index++] = c;
       Serial.printf("%c", c);  
     }
-  }  
+  }
 }
 
 void loop() {
