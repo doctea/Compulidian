@@ -55,6 +55,8 @@ void setup_cv_input() {
     tft_print("..done setup_cv_input\n");
 }
 
+#include "audio/audio.h"
+
 // initialise the input voltage ParameterInputs that can be mapped to Parameters
 FLASHMEM 
 void setup_parameter_inputs() {
@@ -63,32 +65,39 @@ void setup_parameter_inputs() {
     //Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
     tft_print("..setup_parameter_inputs...");
 
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(0, 0, 2, 5.0, false));    // main knob
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(1, 0, 3, 5.0, false));    // cv1
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(2, 1, 2, 5.0, false));    // knob x
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(3, 1, 3, 5.0, false));    // cv2
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(4, 2, 2, 5.0, false));    // knob y
-    parameter_manager->addVoltageSource(new WorkshopVoltageSource(5, 3, 2, 5.0, false));    // switch ?
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(0, &sw, 0, 5.0, false));    // main knob
+    //parameter_manager->voltage_sources->tail()->debug = true;
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(1, &sw, 4, 5.0, false));    // cv1
+    //parameter_manager->voltage_sources->tail()->debug = true;
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(2, &sw, 1, 5.0, false));    // knob x
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(3, &sw, 5, 5.0, false));    // cv2
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(4, &sw, 2, 5.0, false));    // knob y
+    //parameter_manager->voltage_sources->tail()->debug = true;
+    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(5, &sw, 3, 5.0, false));    // switch ?
+    //parameter_manager->voltage_sources->tail()->debug = true; // switch
 
     // initialise the voltage source inputs
     // CVs are bipolar input, knobs are unipolar
     Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
     VoltageParameterInput *vpi_knob_main = new VoltageParameterInput((char*)"Main", "CV Inputs", parameter_manager->voltage_sources->get(0), 0.005, UNIPOLAR, true);    
-    VoltageParameterInput *vpi_cv_1 = new VoltageParameterInput((char*)"CV1", "CV Inputs",       parameter_manager->voltage_sources->get(1), 0.005, UNIPOLAR);    
+    VoltageParameterInput *vpi_cv_1 = new VoltageParameterInput((char*)"CV1", "CV Inputs",       parameter_manager->voltage_sources->get(1), 0.005, BIPOLAR, true);    
     Serial.println(F("==== begin setup_parameter_inputs 2====")); Serial_flush();
     VoltageParameterInput *vpi_knob_x = new VoltageParameterInput((char*)"X", "CV Inputs",       parameter_manager->voltage_sources->get(2), 0.005, UNIPOLAR, true);    
-    VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, UNIPOLAR);    
+    VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, BIPOLAR, true);    
     Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
     VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.005, UNIPOLAR, true);    
+
+    // it thinks switch is down!!
 
     //VoltageParameterInput *vpi_switch = new VoltageParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, false);    
     ThresholdToggleParameterInput *vpi_hold_switch = new ThresholdToggleParameterInput(
         (char*)"Hold", "CV Inputs",    
         parameter_manager->voltage_sources->get(5), 
-        0.005, 
+        0.000005, 
         UNIPOLAR, 
         true,
-        -0.4, // under 0.4, switch is HELD
+        //-0.4, // under 0.4, switch is HELD
+        0.0003,
         [=](bool state) -> void { 
             Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
             if (!state) {
@@ -98,18 +107,21 @@ void setup_parameter_inputs() {
             Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
         }
     ); 
+    //vpi_hold_switch->debug = true;
     ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput(
         (char*)"Switch", "CV Inputs",  parameter_manager
         ->voltage_sources->get(5), 
-        0.005, 
+        0.000005, 
         UNIPOLAR, 
         true, 
-        0.7, // over 0.7, switch is MOMENTARY
+        //0.7, // over 0.7, switch is MOMENTARY
+        -0.00005,
         [=](bool state) -> void { Serial.
             printf("Momentary switch %s\n", state ? "ON" : "OFF"); 
             output_wrapper.set_muted(state);
         }
     ); 
+    //vpi_mome_switch->debug = true;
     
     //parameter_manager->voltage_sources->get(0)->debug = true;
 

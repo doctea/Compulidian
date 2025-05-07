@@ -7,6 +7,8 @@
 #include "audio/audio.h"
 
 #include "Drums.h"
+
+#include <SimplyAtomic.h>
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
   uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
@@ -126,7 +128,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
+            if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         }

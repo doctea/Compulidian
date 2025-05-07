@@ -23,6 +23,7 @@
 #endif
 
 #include "computer.h"
+#include <SimplyAtomic.h>
 
 WorkshopOutputWrapper output_wrapper;
 
@@ -187,6 +188,7 @@ void process_serial_input() {
     } else if (c=='\r' || c=='\n' || c=='#') {
       serial_input_buffer[serial_input_buffer_index] = 0;
       Serial.printf("\ngot '%s'\n", serial_input_buffer);
+
       if (serial_input_buffer[0]=='p') {
         Serial.println(F("p command received!"));
         for (int i = 0 ; i < sequencer->number_patterns ; i++) {
@@ -201,13 +203,50 @@ void process_serial_input() {
       } else if (serial_input_buffer[0]=='I') {
         Serial.println(F("I command received!"));
         debug_enable_output_parameter_input = !debug_enable_output_parameter_input;
+      } else if (serial_input_buffer[0]=='d' || serial_input_buffer[0]=='D') {
+        Serial.println(F("d command received!"));
+        if (serial_input_buffer[1]=='p') {
+          // set debug status on a Parameter
+          Serial.println(F("d p command received!"));
+          if(strlen(serial_input_buffer)>2) {
+            // get the index of the parameter from 2nd byte
+            int index = atoi(&serial_input_buffer[2]);
+            if (index>=0 && index<parameter_manager->available_parameters->size()) {
+              FloatParameter *p = parameter_manager->available_parameters->get(index);
+              p->debug = serial_input_buffer[0]=='D' ? true : false;
+              Serial.printf("parameter %i: %s set to debug=%s\n", index, p->label, serial_input_buffer[0]=='D' ? "true" : "false");
+            } else {
+              Serial.printf("invalid parameter index %i\n", index);
+            }
+          } else {
+            Serial.println(F("d i command needs a parameter index!"));
+          }
+        } else {
+          // set debug status on a ParameterInput
+          Serial.println(F("d i command received!"));
+          if(strlen(serial_input_buffer)>2) {
+            // get the index of the parameter from 2nd byte
+            int index = atoi(&serial_input_buffer[2]);
+            if (index>=0 && index<parameter_manager->available_inputs->size()) {
+              BaseParameterInput *p = parameter_manager->available_inputs->get(index);
+              p->debug = serial_input_buffer[0]=='D' ? true : false;
+              Serial.printf("input %i: %s set to debug=%s\n", index, p->name, serial_input_buffer[0]=='D' ? "true" : "false");
+            } else {
+              Serial.printf("invalid input index %i\n", index);
+            }
+          } else {
+            Serial.println(F("d i command needs an input index!"));
+          }
+        }
+        serial_input_buffer_index = 0;
+        Serial.println("Finished parsing serial input");
+        break;
       }
-      serial_input_buffer_index = 0;
     } else {
       serial_input_buffer[serial_input_buffer_index++] = c;
       Serial.printf("%c", c);  
     }
-  }
+  }  
 }
 
 void loop() {
@@ -244,7 +283,9 @@ void loop() {
   }
 
   //if (ticked) 
-  process_serial_input();
+  //ATOMIC() {
+    process_serial_input();
+  //}
 
   // flash LEDs on the beat if muted
   if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks)) {
