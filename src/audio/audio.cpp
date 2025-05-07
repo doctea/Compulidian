@@ -175,7 +175,7 @@ void loop1(){
 }
 */
 
-SineWaveLookup sw;
+SamplePlayer sw;
 void setup1()
 {
   while (!started && !Serial) {

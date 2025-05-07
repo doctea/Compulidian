@@ -22,6 +22,7 @@ struct voice_t {
 
 extern voice_t voice[NUM_VOICES];
 
+#include "audio/samps.h"
 
 void setup_samples();
 
@@ -29,61 +30,55 @@ void setup_samples();
 #include "ComputerCard.h"
 #include <cmath>
 
-class SineWaveLookup : public ComputerCard
+class SamplePlayer : public ComputerCard
 {
 public:
-	// 512-point (9-bit) lookup table
-	// If memory was a concern we could reduce this to ~1/4 of the size,
-	// by exploiting symmetry of sine wave, but this only uses 2KB of ~250KB on the RP2040
-	constexpr static unsigned tableSize = 512;
-	int16_t sine[tableSize];
 
-	// Bitwise AND of index integer with tableMask will wrap it to table size
-	constexpr static uint32_t tableMask = tableSize - 1;
-
-	// Sine wave phase (0-2^32 gives 0-2pi phase range)
-	uint32_t phase;
-	
-	SineWaveLookup()
+	/*SamplePlayer()
 	{
-		// Initialise phase of sine wave to 0
-		phase = 0;
-		
-		for (unsigned i=0; i<tableSize; i++)
-		{
-			// just shy of 2^15 * sin
-			sine[i] = int16_t(32000*sin(2*i*M_PI/double(tableSize)));
-		}
 
-	}
-	
-	virtual void ProcessSample()
+	}*/
+
+    int_fast32_t newsample,samplesum=0;
+    uint_fast32_t index;
+    int_fast16_t samp0,samp1,delta,tracksample;
+
+    void CalculateSamples() {
+        for (int_fast8_t track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up
+            tracksample=voice[track].sample; // precompute for a little more speed below
+            index=voice[track].sampleindex>>12; // get the integer part of the sample increment
+            if (index <= sample[tracksample].samplesize) { // if sample is playing, do interpolation   
+              //Serial.printf("track %i is playing sample %i\n", track, tracksample); Serial.flush();
+              samp0=sample[tracksample].samplearray[index]; // get the first sample to interpolate
+              samp1=sample[tracksample].samplearray[index+1];// get the second sample
+              delta=samp1-samp0;
+              newsample=(int_fast32_t)samp0+((int_fast32_t)delta*((int_fast32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
+              //samplesum+=(newsample*voice[track].level); // changed to MIDI velocity levels 0-127
+              samplesum+=newsample;
+              voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
+            }
+            /*if (index <= sample[tracksample].samplesize) {
+                newsample = sample[tracksample].samplearray[index]; // get the first sample to interpolate
+                samplesum+=newsample;
+                voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
+            }*/
+        }
+
+        //samplesum = random() % 32768; // random sample for testing
+    
+        samplesum=samplesum>>7;  // adjust for volume multiply above
+        //samplesum=>>=6;  // scale down to 12 bit range
+        if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
+        if  (samplesum<-32767) samplesum=-32767;
+    }
+
+    virtual void ProcessSample()
 	{
-		uint32_t index = phase >> 23; // convert from 32-bit phase to 9-bit lookup table index
-		int32_t r = (phase & 0x7FFFFF) >> 7; // fractional part is last 23 bits of phase, shifted to 16-bit 
-
-		// Look up this index and next index in lookup table
-		int32_t s1 = sine[index];
-		int32_t s2 = sine[(index+1) & tableMask];
-
-		// Linear interpolation of s1 and s2, using fractional part
-		// Shift right by 20 bits
-		// (16 bits of r, and 4 bits to reduce 16-bit signed sine table to 12-bit output)
-		int32_t out = (s2 * r + s1 * (65536 - r)) >> 20;
-
-		AudioOut1(out);
-		AudioOut2(out);
-		
-		// Want 440Hz sine wave
-		// Phase is a 32-bit integer, so 2^32 steps
-		// We will increment it at 48kHz, and want it to wrap at 440Hz
-		// 
-		// Increment = 2^32 * freq / samplerate
-		//           = 2^32 * 440 / 48000
-		//           = 39370533.54666...
-		//          ~= 39370534
-		phase += 39370534;
+        //CalculateSamples();
+        
+		AudioOut1(samplesum);
+		AudioOut2(samplesum);		
 	}
 };
 
-extern SineWaveLookup sw;
+extern SamplePlayer sw;

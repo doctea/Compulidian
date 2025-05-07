@@ -59,6 +59,9 @@ void global_on_restart() {
 
 
 void setup() {
+
+  set_sys_clock_khz(180000, true);
+
   setup_serial();
 
   #ifdef USE_TINYUSB
@@ -294,6 +297,12 @@ void loop() {
     output_wrapper.all_leds_on();
   } else if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks,6)) {
     output_wrapper.all_leds_off();
+  }
+
+  static uint32_t last_sample_at_us = 0;
+  if (micros()-last_sample_at_us >= 20) {
+    sw.CalculateSamples();
+    last_sample_at_us = micros();
   }
 
 }
