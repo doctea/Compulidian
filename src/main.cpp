@@ -245,6 +245,12 @@ void process_serial_input() {
         serial_input_buffer_index = 0;
         Serial.println("Finished parsing serial input");
         break;
+      } else if (serial_input_buffer[0]=='s') {
+        sw.interpolate_enabled = !sw.interpolate_enabled;
+        Serial.printf("Interpolation %s\n", sw.interpolate_enabled ? "enabled" : "disabled");
+      } else if (serial_input_buffer[0]=='c') {
+        sw.calculate_mode = sw.calculate_mode == IN_MAIN_LOOP ? IN_PROCESS_SAMPLE : IN_MAIN_LOOP;
+        Serial.printf("calculate_mode %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
       }
       serial_input_buffer_index = 0;
     } else {
@@ -299,10 +305,12 @@ void loop() {
     output_wrapper.all_leds_off();
   }
 
-  static uint32_t last_sample_at_us = 0;
-  if (micros()-last_sample_at_us >= 20) {
-    sw.CalculateSamples();
-    last_sample_at_us = micros();
+  if (sw.calculate_mode==IN_MAIN_LOOP) {
+    static uint32_t last_sample_at_us = 0;
+    if (micros()-last_sample_at_us >= 10) {
+      sw.CalculateSamples();
+      last_sample_at_us = micros();
+    }
   }
 
 }
