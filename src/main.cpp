@@ -60,7 +60,7 @@ void global_on_restart() {
 
 void setup() {
 
-  set_sys_clock_khz(180000, true);
+  set_sys_clock_khz(220000, true);
 
   setup_serial();
 
@@ -197,7 +197,10 @@ void process_serial_input() {
         Serial.println(F("l command received!"));
         for (int i = 0 ; i < sequencer->number_patterns ; i++) {
           SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
-          Serial.printf("pattern %i: %s\n", i, p->get_output_label());
+          Serial.printf("Pattern %i: %s\n", i, p->get_output_label());
+        }
+        for (int i = 0 ; i < NUM_VOICES ; i++) {
+          Serial.printf("Voice %i: %s on %i (%s)\n", i, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
         }
       } else if (serial_input_buffer[0]=='p') {
         Serial.println(F("p command received!"));

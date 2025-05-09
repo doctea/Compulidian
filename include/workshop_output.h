@@ -88,7 +88,18 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             return -1;
 
         for (int i = 0 ; i < NUM_VOICES ; i++) {
-            if (sample[voice[i].sample].MIDINOTE == note) {
+            int_fast8_t sample_number = voice[i].sample;
+            if (sample_number < 0 || sample_number >= NUM_SAMPLES) {
+                if (Serial) Serial.printf("get_voice_number_for_note(%i) invalid sample number %i\n", note, sample_number);
+                continue;
+            }
+            sample_t *cs = &sample[sample_number];
+            //if (Serial) Serial.printf("get_voice_number_for_note(%i) checking sample %i ", note, sample_number);
+            // matches note %i - , i
+            ////if (Serial) Serial.printf("%s (aka %s)", cs->sname, get_note_name_c(note, GM_CHANNEL_DRUMS));
+            //if (Serial) Serial.println();
+            if (cs->MIDINOTE == note) {
+                //if (Serial) Serial.printf("\tget_voice_number_for_note(%i) found voice %i\n", note, i);
                 return i;
             }
         }
@@ -128,8 +139,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            //if (this->debug) 
-                Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
+            if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         } else {

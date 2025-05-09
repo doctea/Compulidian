@@ -5,7 +5,8 @@
 #define IN_PROCESS_SAMPLE 1
 #define IN_MAIN_LOOP 2
 
-#define NUM_VOICES 14
+//#define NUM_VOICES 16
+extern int NUM_VOICES;
 
 // DAC parameters
 //  A-channel, 1x, active
@@ -23,7 +24,7 @@ struct voice_t {
     uint16_t sampleincrement; // 1:12 fixed point sample step for pitch changes 
 };
 
-extern voice_t voice[NUM_VOICES];
+extern voice_t voice[];
 
 #include "audio/samps.h"
 
@@ -70,7 +71,10 @@ public:
 
         //samplesum = random() % 32768; // random sample for testing
     
-        samplesum=samplesum>>7;  // adjust for volume multiply above
+        if (enable_volume)
+            samplesum=samplesum>>7;  // adjust for volume multiply above
+        else
+            samplesum=samplesum>>3;  // adjust for volume multiply above
         //samplesum=>>=6;  // scale down to 12 bit range
         if  (samplesum>32767) samplesum=32767; // clip if sample sum is too large
         if  (samplesum<-32767) samplesum=-32767;
@@ -85,7 +89,7 @@ public:
         }
         
 		AudioOut1(samplesum16);
-		//AudioOut2(samplesum16);
+		AudioOut2(samplesum16);
 	}
 };
 

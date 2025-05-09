@@ -12,34 +12,56 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 
 ## Basic features
 
-- Main knob controls lower tracks density (kick, clap, snare, toms...).
-- X knob controls upper tracks density (hihats...).
-- Y knob controls BPM, from 30 to 180 (disabled when slaved to external clock).
-- has multiple independent tracks for kick, snare, hi-hat, etc etc (actually ~20 tracks internally)
-- plays lofi audio samples out of both audio outputs (currently an 808 kit).
-- currently 4 gate outputs (via Computer's 2x pulse and 2x cv outputs) are fed from kick, snare and 2x hi-hat tracks
-- defaults to a four-on-the-floor style pattern
-- tracks are split into two groups, each group has its own 'global density' parameter controlled by Main knob and X knob, and modulated via CV1 and CV2.  Go from none to very hectic number of pulses.
-- last bar of every 4-bar phrase plays a variation.
-- at start of every phrase (4 bars), pattern resets to the default pattern but increases seed by 1 so get a new slight variation.
-- putting the switch UP locks the current pattern seed (fills still play, can still adjust/modulate the density, but pattern seed won't change).
-- holding the switch DOWN mutes the sequencer so no new notes will play.  when muted the LEDs will flash on the beat so you can time drops and cut-outs better.
-- if a MIDI start message is received over USB MIDI then the internal clock is disabled and playback will be slaved to the external USB MIDI clock instead.
-- if a USB MIDI host is connected then the drum patterns are sent back to the host on channel 10.
+- Multiple independent Euclidean tracks for kick, snare, hi-hat, etc etc (actually ~16 tracks internally).
+- Plays audio samples out of both audio outputs (currently an 808 kit).
+- Currently 4 gate outputs (via Computer's 2x pulse and 2x cv outputs) are fed from kick, snare and 2x hi-hat tracks
+- Defaults to a four-on-the-floor style pattern
+- Tracks are split into two groups, each group has its own 'global density' parameter controlled by Main knob and X knob, and modulated via CV1 and CV2.  Go from none to a very hectic number of pulses.
+- Last bar of every 4-bar phrase plays a variation fill.
+- At start of every phrase (4 bars), pattern resets to the default pattern but increases seed by 1 so get a new slight variation.
+
+### CV, Knob and Switch controls
+
+^ Input             ^ Function                                                                                                        ^
+| Main knob + CV1   | Control density multiplier of the first bank of Euclidean tracks (kick, clap, snare, toms...), from 0x to 1.5x  |
+| X knob + CV2      | Control density multiplier of the second bank of Euclidian tracks (hihats...), from 0x to 1.5x                  |
+| Y knob            | Controls tempo of internal clock, from 30BPM to 180 (disabled when slaved to external clock).                   |
+| Switch UP (hold)  | Freeze the random seed, so same pattern will continue playing.  Fills and density still take effect.            |
+| Switch DOWN (mom) | Mutes the sequencer so no new notes will play.  LEDs will flash on the beat.                                    |
+
+### MIDI features
+
+- If a MIDI start message is received over USB MIDI then the internal clock is disabled and playback will be slaved to the external USB MIDI clock instead.
+- If a USB MIDI host is connected then the drum patterns are sent back to the host on channel 10.
 
 ### Serial console commands
 
 - Connect via serial to access debug console.
-- Type `p <output name>` and press enter to trigger the pattern of that name (Kick, Stick, Clap, Snare, Cymbal 1, Tamb, HiTom, LoTom, PHH, OHH, CHH, Cymbal 2, Splash, Vibra, Ride Bell, Ride Cymbal)
-- Type `I` and press enter to toggle ParameterInput console display
+- Press `enter` after entering one of these commands to do the appropriate action.
+- Backspace/delete etc don't currently work so don't make any typos!
+- Press `tab`+ `enter` to repeat the previous command.
+
+^ Command           ^ Function ^
+| `l`               | List tracks and sample names                                                |
+| `p <output_name>` | Trigger the pattern of the given name (eg Kick, Stick, Clap..)              |
+| `s`               | Toggle sample interpolation (trade off audio quality vs CPU)                |
+| `c`               | Toggle between audio generation in interrupt (HQ) vs main loop 'dirty' mode |
+| `v`               | Toggle voice/sample volume honouring (doesn't seem to make much diff)       |
+
+## Problems
+
+- Seems like ADC reads are a bit wobbly when higher CPU used; reducing number of voices seems to improve stability
+- Having to overclock to 220mhz to get 16 voices to play within sample time.
 
 ## Future plans
 
-- convert to a ComputerCard to take advantage of normalisation probes, better input reading, and better sound production
-- known problem: very lofi audio quality with bad aliasing problems
-- all the modulation possibilities need to be made to connect to sensible things, basic proof of concept atm
-- enable to slave to external CV clock and reset
-- send CV LFOs/envelopes instead of gates?
+- (in progress, currently a bastardised hybrid) convert to a ComputerCard to take advantage of normalisation probes, better input reading, and better sound production
+- very lofi audio quality with bad aliasing problems when in 'main loop dirty mode' -- has some charm to it so could use this as an effect
+- all the modulation possibilities need to be made to connect to sensible things;
+- make modulation/knob/parameter mapping configurable (maybe via WebUSB?)
+- use audio inputs as extra CV inputs
+- slave to external CV clock and reset
+- option to send LFOs/envelopes out on CV, instead of using them as gates?
 - i also have some code for generating scale-quantised bassline patterns based on the generated euclidian patterns if that would be interesting to anyone
   - or could maybe output a bassline on the second output
 - enable selection of initial seed so can choose many variations of the default pattern?
