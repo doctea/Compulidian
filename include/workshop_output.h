@@ -7,6 +7,8 @@
 #include "audio/audio.h"
 
 #include "Drums.h"
+
+#include <SimplyAtomic.h>
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
   uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
@@ -86,7 +88,18 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             return -1;
 
         for (int i = 0 ; i < NUM_VOICES ; i++) {
-            if (sample[voice[i].sample].MIDINOTE == note) {
+            int_fast8_t sample_number = voice[i].sample;
+            if (sample_number < 0 || sample_number >= NUM_SAMPLES) {
+                if (Serial) Serial.printf("get_voice_number_for_note(%i) invalid sample number %i\n", note, sample_number);
+                continue;
+            }
+            sample_t *cs = &sample[sample_number];
+            //if (Serial) Serial.printf("get_voice_number_for_note(%i) checking sample %i ", note, sample_number);
+            // matches note %i - , i
+            ////if (Serial) Serial.printf("%s (aka %s)", cs->sname, get_note_name_c(note, GM_CHANNEL_DRUMS));
+            //if (Serial) Serial.println();
+            if (cs->MIDINOTE == note) {
+                //if (Serial) Serial.printf("\tget_voice_number_for_note(%i) found voice %i\n", note, i);
                 return i;
             }
         }
@@ -126,9 +139,12 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
+            if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
+        } else {
+            if (Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
+            //Serial.flush();
         }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {

@@ -1,0 +1,38 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../my_libraries/midihelpers"
+		},
+		{
+			"path": "../my_libraries/parameters"
+		},
+		{
+			"path": "../my_libraries/seqlib"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"ratio": "cpp",
+			"*.tcc": "cpp",
+			"ostream": "cpp",
+			"cstddef": "cpp",
+			"compare": "cpp",
+			"cstdint": "cpp",
+			"atomic": "cpp",
+			"mutex": "cpp",
+			"thresholdtoggleparameterinput": "cpp",
+			"array": "cpp",
+			"memory": "cpp",
+			"format": "cpp",
+			"future": "cpp",
+			"istream": "cpp",
+			"functional": "cpp",
+			"tuple": "cpp",
+			"utility": "cpp",
+			"variant": "cpp"
+		}
+	}
+}

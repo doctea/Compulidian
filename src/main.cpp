@@ -24,6 +24,7 @@
 
 #include "computer.h"
 #include "webusb/webusb.h"
+#include <SimplyAtomic.h>
 
 WorkshopOutputWrapper output_wrapper;
 
@@ -77,19 +78,23 @@ void setup_webusb() {
 }
 
 void setup() {
+
+  set_sys_clock_khz(220000, true);
+
   setup_serial();
 
   #ifdef USE_TINYUSB
-    Serial.println("setup_usb!"); Serial.flush();
+    if (Serial) { Serial.println("setup_usb!"); Serial.flush(); }
     setup_usb();
     setup_midi();
   #endif
 
-  setup_webusb();
-
   Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
+  if (Serial) { Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush(); }
   SetupComputerIO();
-  Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
+  if (Serial) { Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush(); }
+
+  setup_webusb();
 
   output_wrapper.reset();
 
@@ -100,7 +105,7 @@ void setup() {
 
   //set_bpm(60);
 
-  Serial.println(F("done setup_uclock()"));
+  if (Serial) { Serial.println(F("done setup_uclock()")); }
   
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
@@ -116,13 +121,13 @@ void setup() {
 
   #ifdef ENABLE_PARAMETERS
     #ifdef ENABLE_CV_INPUT
-      Serial.println(F("setting up cv input..")); Serial.flush();
+      if (Serial) { Serial.println(F("setting up cv input..")); Serial.flush(); }
       setup_cv_input();
-      Serial.println(F("..done setup_cv_input")); Serial.flush();
+      if (Serial) { Serial.println(F("..done setup_cv_input")); Serial.flush(); }
       
-      Serial.println(F("setting up parameter inputs..")); Serial.flush();
+      if (Serial) { Serial.println(F("setting up parameter inputs..")); Serial.flush(); }
       setup_parameter_inputs();
-      Serial.println(F("..done setup_parameter_inputs")); Serial.flush();
+      if (Serial) { Serial.println(F("..done setup_parameter_inputs")); Serial.flush(); }
       Debug_printf("after setup_parameter_inputs(), free RAM is\t%u\n", freeRam());
     #endif
     /*#ifdef ENABLE_CV_INPUT  // these are midi outputs!
@@ -154,7 +159,7 @@ void setup() {
   #endif
   started = true;
 
-  Serial.println(F("setup() done - starting!"));
+  if (Serial) { Serial.println(F("setup() done - starting!")); }
 
 }
 
@@ -190,7 +195,7 @@ void process_serial_input() {
     //if(c=='\r') continue; // ignore carriage return
 
     if (serial_input_buffer_index >= sizeof(serial_input_buffer)-1) {
-      Serial.printf("serial_input_buffer overflow, resetting\n");
+      if (Serial) { Serial.printf("serial_input_buffer overflow, resetting\n"); }
       serial_input_buffer_index = 0;
     }
 
@@ -208,7 +213,18 @@ void process_serial_input() {
     } else if (c=='\r' || c=='\n' || c=='#') {
       serial_input_buffer[serial_input_buffer_index] = 0;
       Serial.printf("\ngot '%s'\n", serial_input_buffer);
-      if (serial_input_buffer[0]=='p') {
+
+      if (serial_input_buffer[0]=='l') {
+        // list the track names
+        Serial.println(F("l command received!"));
+        for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
+          Serial.printf("Pattern %i: %s\n", i, p->get_output_label());
+        }
+        for (int i = 0 ; i < NUM_VOICES ; i++) {
+          Serial.printf("Voice %i: %s on %i (%s)\n", i, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
+        }
+      } else if (serial_input_buffer[0]=='p') {
         Serial.println(F("p command received!"));
         for (int i = 0 ; i < sequencer->number_patterns ; i++) {
           SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
@@ -222,6 +238,56 @@ void process_serial_input() {
       } else if (serial_input_buffer[0]=='I') {
         Serial.println(F("I command received!"));
         debug_enable_output_parameter_input = !debug_enable_output_parameter_input;
+
+      } else if (serial_input_buffer[0]=='d' || serial_input_buffer[0]=='D') {
+        Serial.println(F("d command received!"));
+        if (serial_input_buffer[1]=='p') {
+          // set debug status on a Parameter
+          Serial.println(F("d p command received!"));
+          if(strlen(serial_input_buffer)>2) {
+            // get the index of the parameter from 2nd byte
+            int index = atoi(&serial_input_buffer[2]);
+            if (index>=0 && index<parameter_manager->available_parameters->size()) {
+              FloatParameter *p = parameter_manager->available_parameters->get(index);
+              p->debug = serial_input_buffer[0]=='D' ? true : false;
+              Serial.printf("parameter %i: %s set to debug=%s\n", index, p->label, serial_input_buffer[0]=='D' ? "true" : "false");
+            } else {
+              Serial.printf("invalid parameter index %i\n", index);
+            }
+          } else {
+            Serial.println(F("d i command needs a parameter index!"));
+          }
+        } else {
+          // set debug status on a ParameterInput
+          Serial.println(F("d i command received!"));
+          if(strlen(serial_input_buffer)>2) {
+            // get the index of the parameter from 2nd byte
+            int index = atoi(&serial_input_buffer[2]);
+            if (index>=0 && index<parameter_manager->available_inputs->size()) {
+              BaseParameterInput *p = parameter_manager->available_inputs->get(index);
+              p->debug = serial_input_buffer[0]=='D' ? true : false;
+              Serial.printf("input %i: %s set to debug=%s\n", index, p->name, serial_input_buffer[0]=='D' ? "true" : "false");
+            } else {
+              Serial.printf("invalid input index %i\n", index);
+            }
+          } else {
+            Serial.println(F("d i command needs an input index!"));
+          }
+        }
+        serial_input_buffer_index = 0;
+        Serial.println("Finished parsing serial input");
+        break;
+      } else if (serial_input_buffer[0]=='s') {
+        sw.interpolate_enabled = !sw.interpolate_enabled;
+        Serial.printf("Interpolation %s\n", sw.interpolate_enabled ? "enabled" : "disabled");
+      } else if (serial_input_buffer[0]=='c') {
+        Serial.printf("calculate_mode was %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
+        sw.calculate_mode = sw.calculate_mode == IN_MAIN_LOOP ? IN_PROCESS_SAMPLE : IN_MAIN_LOOP;
+        Serial.printf("calculate_mode now %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
+      } else if (serial_input_buffer[0]=='v') {
+        Serial.printf("volume was %s\n", sw.enable_volume ? "enabled" : "disabled");
+        sw.enable_volume = !sw.enable_volume;
+        Serial.printf("volume now %s\n", sw.enable_volume ? "enabled" : "disabled");
       }
       serial_input_buffer_index = 0;
     } else {
@@ -281,13 +347,23 @@ void loop() {
   }
 
   //if (ticked) 
-  process_serial_input();
+  //ATOMIC() {
+    process_serial_input();
+  //}
 
   // flash LEDs on the beat if muted
   if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks)) {
     output_wrapper.all_leds_on();
   } else if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks,6)) {
     output_wrapper.all_leds_off();
+  }
+
+  if (sw.calculate_mode==IN_MAIN_LOOP) {
+    static uint32_t last_sample_at_us = 0;
+    if (micros()-last_sample_at_us >= 10) {
+      sw.CalculateSamples();
+      last_sample_at_us = micros();
+    }
   }
 
 }
