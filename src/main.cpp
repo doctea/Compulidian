@@ -65,14 +65,14 @@ void setup() {
   setup_serial();
 
   #ifdef USE_TINYUSB
-    Serial.println("setup_usb!"); Serial.flush();
+    if (Serial) { Serial.println("setup_usb!"); Serial.flush(); }
     setup_usb();
     setup_midi();
   #endif
 
-  Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush();
+  if (Serial) { Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush(); }
   SetupComputerIO();
-  Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush();
+  if (Serial) { Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush(); }
 
   output_wrapper.reset();
 
@@ -83,7 +83,7 @@ void setup() {
 
   //set_bpm(60);
 
-  Serial.println(F("done setup_uclock()"));
+  if (Serial) { Serial.println(F("done setup_uclock()")); }
   
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
@@ -99,13 +99,13 @@ void setup() {
 
   #ifdef ENABLE_PARAMETERS
     #ifdef ENABLE_CV_INPUT
-      Serial.println(F("setting up cv input..")); Serial.flush();
+      if (Serial) { Serial.println(F("setting up cv input..")); Serial.flush(); }
       setup_cv_input();
-      Serial.println(F("..done setup_cv_input")); Serial.flush();
+      if (Serial) { Serial.println(F("..done setup_cv_input")); Serial.flush(); }
       
-      Serial.println(F("setting up parameter inputs..")); Serial.flush();
+      if (Serial) { Serial.println(F("setting up parameter inputs..")); Serial.flush(); }
       setup_parameter_inputs();
-      Serial.println(F("..done setup_parameter_inputs")); Serial.flush();
+      if (Serial) { Serial.println(F("..done setup_parameter_inputs")); Serial.flush(); }
       Debug_printf("after setup_parameter_inputs(), free RAM is\t%u\n", freeRam());
     #endif
     /*#ifdef ENABLE_CV_INPUT  // these are midi outputs!
@@ -137,7 +137,7 @@ void setup() {
   #endif
   started = true;
 
-  Serial.println(F("setup() done - starting!"));
+  if (Serial) { Serial.println(F("setup() done - starting!")); }
 
 }
 
@@ -173,7 +173,7 @@ void process_serial_input() {
     //if(c=='\r') continue; // ignore carriage return
 
     if (serial_input_buffer_index >= sizeof(serial_input_buffer)-1) {
-      Serial.printf("serial_input_buffer overflow, resetting\n");
+      if (Serial) { Serial.printf("serial_input_buffer overflow, resetting\n"); }
       serial_input_buffer_index = 0;
     }
 
@@ -192,7 +192,14 @@ void process_serial_input() {
       serial_input_buffer[serial_input_buffer_index] = 0;
       Serial.printf("\ngot '%s'\n", serial_input_buffer);
 
-      if (serial_input_buffer[0]=='p') {
+      if (serial_input_buffer[0]=='l') {
+        // list the track names
+        Serial.println(F("l command received!"));
+        for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
+          Serial.printf("pattern %i: %s\n", i, p->get_output_label());
+        }
+      } else if (serial_input_buffer[0]=='p') {
         Serial.println(F("p command received!"));
         for (int i = 0 ; i < sequencer->number_patterns ; i++) {
           SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
@@ -249,8 +256,13 @@ void process_serial_input() {
         sw.interpolate_enabled = !sw.interpolate_enabled;
         Serial.printf("Interpolation %s\n", sw.interpolate_enabled ? "enabled" : "disabled");
       } else if (serial_input_buffer[0]=='c') {
+        Serial.printf("calculate_mode was %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
         sw.calculate_mode = sw.calculate_mode == IN_MAIN_LOOP ? IN_PROCESS_SAMPLE : IN_MAIN_LOOP;
-        Serial.printf("calculate_mode %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
+        Serial.printf("calculate_mode now %s\n", sw.calculate_mode == IN_MAIN_LOOP ? "IN_MAIN_LOOP" : "IN_PROCESS_SAMPLE");
+      } else if (serial_input_buffer[0]=='v') {
+        Serial.printf("volume was %s\n", sw.enable_volume ? "enabled" : "disabled");
+        sw.enable_volume = !sw.enable_volume;
+        Serial.printf("volume now %s\n", sw.enable_volume ? "enabled" : "disabled");
       }
       serial_input_buffer_index = 0;
     } else {

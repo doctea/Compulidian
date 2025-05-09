@@ -37,17 +37,12 @@ class SamplePlayer : public ComputerCard
 {
 public:
 
-	/*SamplePlayer()
-	{
-
-	}*/
-
-    volatile int_fast32_t newsample,samplesum=0;
-
+    int_fast32_t newsample,samplesum=0;
     volatile int_fast16_t samplesum16=0;
 
-    bool interpolate_enabled = true;
-    bool calculate_mode = IN_MAIN_LOOP; // default to main loop mode
+    volatile bool interpolate_enabled = false;
+    volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to main loop mode
+    volatile bool enable_volume = true; // default to volume enabled
 
     void __not_in_flash_func(CalculateSamples)() {
         for (int_fast8_t track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up
@@ -63,10 +58,11 @@ public:
                     samp1=sample[tracksample].samplearray[index+1];// get the second sample
                     delta=samp1-samp0;
                     newsample=(int_fast32_t)samp0+((int_fast32_t)delta*((int_fast32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
-                    //newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
                 } else {
                     newsample=sample[tracksample].samplearray[index]; // get the first sample to interpolate
                 }
+                if (enable_volume) 
+                    newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
                 samplesum+=newsample;
                 voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
             }

@@ -128,9 +128,13 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
+            //if (this->debug) 
+                Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
+        } else {
+            if (Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
+            //Serial.flush();
         }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
