@@ -1,3 +1,7 @@
+WIP version exploring use of WebUSB to control parameters -- is extremely buggy to the point of being unusable!
+
+
+
 # Compulidian
 
 Made a start porting my euclidean rhythm generator + modulation libraries to a (Music Thing Workshop Computer)[https://github.com/tomWhitwell/Workshop_Computer] card.
