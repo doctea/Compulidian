@@ -61,9 +61,11 @@ void global_on_restart() {
   //Serial.println(F("<==on_restart()"));
 }
 
-void shuffled_track_callback(uint8_t track, uint32_t step) {
-  sequencer->on_step_shuffled(track, step);
-}
+#ifdef ENABLE_SHUFFLE
+  void shuffled_track_callback(uint8_t track, uint32_t step) {
+    sequencer->on_step_shuffled(track, step);
+  }
+#endif
 
 void setup() {
 
