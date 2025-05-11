@@ -22,6 +22,10 @@
     #endif
 #endif
 
+#ifdef ENABLE_SHUFFLE
+  #include "sequencer/shuffle.h"
+#endif
+
 #include "computer.h"
 #include <SimplyAtomic.h>
 
@@ -57,6 +61,9 @@ void global_on_restart() {
   //Serial.println(F("<==on_restart()"));
 }
 
+void shuffled_track_callback(uint8_t track, uint32_t step) {
+  sequencer->on_step_shuffled(track, step);
+}
 
 void setup() {
 
@@ -81,7 +88,15 @@ void setup() {
   setup_uclock(do_tick, uClock.PPQN_24);
   set_global_restart_callback(global_on_restart);
 
-  //set_bpm(60);
+  #ifdef ENABLE_SHUFFLE
+    // set up shuffle pattern
+    int8_t shuffle_75[2] = {0, 12};
+    shuffle_pattern_wrapper[0]->set_amount(0.5);
+    shuffle_pattern_wrapper[0]->set_steps(shuffle_75, 2);
+    shuffle_pattern_wrapper[0]->set_active(true);
+    uClock.setTrackOnStep(shuffled_track_callback);
+    //uClock.setTrackShuffle(0, true);
+  #endif
 
   if (Serial) { Serial.println(F("done setup_uclock()")); }
   
