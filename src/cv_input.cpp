@@ -77,8 +77,8 @@ void setup_parameter_inputs() {
     //parameter_manager->voltage_sources->tail()->debug = true; // switch
 
     #ifdef ENABLE_SHUFFLE
-        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(6, &sw, 6, 5.0, false));    // audio in 1 used as CV
-        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(7, &sw, 7, 5.0, false));    // audio in 2 used as CV
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(6, &sw, 6, 8.0, false));    // audio in 1 used as CV
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(7, &sw, 7, 8.0, false));    // audio in 2 used as CV
     #endif
 
     // initialise the voltage source inputs
