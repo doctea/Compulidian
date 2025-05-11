@@ -76,8 +76,10 @@ void setup_parameter_inputs() {
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(5, &sw, 3, 5.0, false));    // switch ?
     //parameter_manager->voltage_sources->tail()->debug = true; // switch
 
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(6, &sw, 6, 5.0, false));    // audio in 1 used as CV
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(7, &sw, 7, 5.0, false));    // audio in 2 used as CV
+    #ifdef ENABLE_SHUFFLE
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(6, &sw, 6, 5.0, false));    // audio in 1 used as CV
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(7, &sw, 7, 5.0, false));    // audio in 2 used as CV
+    #endif
 
     // initialise the voltage source inputs
     // CVs are bipolar input, knobs are unipolar
@@ -124,8 +126,10 @@ void setup_parameter_inputs() {
     ); 
     //vpi_mome_switch->debug = true;
     
-    VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
-    VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
+    #ifdef ENABLE_SHUFFLE
+        VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
+        VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
+    #endif
 
     //parameter_manager->voltage_sources->get(0)->debug = true;
 
@@ -145,8 +149,10 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(vpi_knob_y);
     parameter_manager->addInput(vpi_hold_switch);
     parameter_manager->addInput(vpi_mome_switch);
-    parameter_manager->addInput(vpi_audio_in_1);
-    parameter_manager->addInput(vpi_audio_in_2);
+    #ifdef ENABLE_SHUFFLE
+        parameter_manager->addInput(vpi_audio_in_1);
+        parameter_manager->addInput(vpi_audio_in_2);
+    #endif
 
     /*VirtualParameterInput *virtpi1 = new VirtualParameterInput((char*)"LFO sync", "LFOs", LFO_LOCKED);
     VirtualParameterInput *virtpi2 = new VirtualParameterInput((char*)"LFO free", "LFOs", LFO_FREE);
@@ -204,14 +210,13 @@ void setup_parameter_inputs() {
                 set_bpm(v);
             }
         },
-        [=]() -> float { return get_bpm(); },                
+        [=]() -> float { return get_bpm(); },
         KNOB_MIN_BPM, KNOB_MAX_BPM
     );
     bpm_parameter->set_slot_0_input(vpi_knob_y);
     bpm_parameter->set_slot_0_amount(1.0f);
     bpm_parameter->set_slot_0_polarity(UNIPOLAR);
     parameter_manager->addParameter(bpm_parameter);
-
     
     tft_print("Finished setup_parameter_inputs()\n");
 }
