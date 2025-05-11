@@ -43,7 +43,7 @@ public:
 
     volatile bool interpolate_enabled = false;
     volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to main loop mode
-    volatile bool enable_volume = true; // default to volume enabled
+    volatile bool enable_volume = false; // default to volume enabled
 
     void __not_in_flash_func(CalculateSamples)() {
         for (int_fast8_t track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up

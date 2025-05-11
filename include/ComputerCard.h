@@ -74,7 +74,7 @@ public:
 	/// Read switch position
 	Switch __not_in_flash_func(SwitchVal)() {return switchVal;}
 
-protected:
+//protected:
 	/// Read switch position
 	bool __not_in_flash_func(SwitchChanged)() {return switchVal != lastSwitchVal;}
 

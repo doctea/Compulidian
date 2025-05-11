@@ -29,7 +29,7 @@
 #include "computer.h"
 #include <SimplyAtomic.h>
 
-WorkshopOutputWrapper output_wrapper;
+WorkshopOutputWrapper output_wrapper(&sw);
 
 std::atomic<bool> started = false;
 std::atomic<bool> ticked = false;

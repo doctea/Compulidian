@@ -11,13 +11,16 @@
 #include <SimplyAtomic.h>
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
-  uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
+  //uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 
   public:
     bool muted = false;
     bool debug = false;
+    ComputerCard *sw = nullptr;
 
-    WorkshopOutputWrapper() {}
+    WorkshopOutputWrapper(ComputerCard *sw) {
+        this->sw = sw;
+    }
 
     void set_muted(bool muted) {
         this->muted = muted;
@@ -35,12 +38,12 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
     void all_leds_on() {
         for (int i = 0 ; i < NUM_LEDS ; i++) {
-            digitalWrite(leds_map[i], HIGH);
+            sw->LedOn(i);
         }
     }
     void all_leds_off() {
         for (int i = 0 ; i < NUM_LEDS ; i++) {
-            digitalWrite(leds_map[i], LOW);
+            sw->LedOff(i);
         }
     }
     void all_gates_off() {
@@ -53,9 +56,10 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
     void gateWrite(int output_number, bool value) {
         value = !value; // invert the value for the gate outputs
         if (output_number == 0 || output_number == 1) {
-            digitalWrite(PULSE_1_RAW_OUT+output_number, value ? HIGH : LOW);
+            sw->PulseOut(output_number, value);
         } else if (output_number == 2 || output_number == 3) {
-            pwm_set_gpio_level(CV_OUT_2+(output_number-2), value ? 4096 : 0);
+            //pwm_set_gpio_level(CV_OUT_2+(output_number-2), value ? 4096 : 0);
+            sw->CVOut(output_number-2, value ? 4096 : 0);
         }
     }
 
@@ -132,7 +136,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             }
 
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            digitalWrite(leds_map[output_number % NUM_LEDS], HIGH);
+            sw->LedOn(output_number % NUM_LEDS);
 
             gateWrite(output_number, HIGH);
         }
@@ -155,7 +159,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            digitalWrite(leds_map[output_number % NUM_LEDS], LOW);
+            sw->LedOff(output_number % NUM_LEDS);
 
             gateWrite(output_number, LOW);
         }
