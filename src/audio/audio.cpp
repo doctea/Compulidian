@@ -74,7 +74,7 @@ voice_t voice[] = {
   250,   // level
   0,    // sampleindex
   4096, // initial pitch step - normal pitch
-  
+
   13,    // default voice 13 assignment
   250,   // level
   0,    // sampleindex

@@ -28,7 +28,7 @@
 WorkshopOutputWrapper output_wrapper;
 
 std::atomic<bool> started = false;
-std::atomic<bool> ticked = false;
+volatile std::atomic<bool> ticked = false;
 
 bool debug_enable_output_parameter_input = false;
 
@@ -297,8 +297,6 @@ void loop() {
 
   if (cv_input_enabled) {
     if (parameter_manager->ready_for_next_update()) {
-        //parameter_manager->process_calibration();
-
         parameter_manager->throttled_update_cv_input__all(5, false, false);
     }
 
@@ -309,9 +307,9 @@ void loop() {
   }
 
   //if (ticked) 
-  //ATOMIC() {
+  ATOMIC() {
     process_serial_input();
-  //}
+  }
 
   // flash LEDs on the beat if muted
   if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks)) {
