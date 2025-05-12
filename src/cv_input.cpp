@@ -85,7 +85,7 @@ void setup_parameter_inputs() {
     VoltageParameterInput *vpi_knob_x = new VoltageParameterInput((char*)"X", "CV Inputs",       parameter_manager->voltage_sources->get(2), 0.005, UNIPOLAR, true);    
     VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, BIPOLAR, true);    
     Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
-    VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.005, UNIPOLAR, true);    
+    VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.01, UNIPOLAR, true);    
 
     // it thinks switch is down!!
 

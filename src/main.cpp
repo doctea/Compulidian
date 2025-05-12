@@ -22,12 +22,12 @@
     #endif
 #endif
 
-#include "computer.h"
+//#include "computer.h"
 #include <SimplyAtomic.h>
 
 WorkshopOutputWrapper output_wrapper;
 
-std::atomic<bool> started = false;
+volatile std::atomic<bool> started = false;
 volatile std::atomic<bool> ticked = false;
 
 bool debug_enable_output_parameter_input = false;
@@ -57,6 +57,23 @@ void global_on_restart() {
   //Serial.println(F("<==on_restart()"));
 }
 
+repeating_timer_t parameter_timer;
+bool parameter_repeating_callback(repeating_timer_t *rt) {
+  #ifdef ENABLE_PARAMETERS
+    if (started) {
+      parameter_manager->throttled_update_cv_input__all(5, false, false);
+    }
+  #endif
+  return true;
+}
+
+repeating_timer_t usb_timer;
+bool usb_repeating_callback(repeating_timer_t *rt) {
+  #ifdef USE_TINYUSB
+    USBMIDI.read();
+  #endif
+  return true;
+}
 
 void setup() {
 
@@ -70,9 +87,9 @@ void setup() {
     setup_midi();
   #endif
 
-  if (Serial) { Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush(); }
-  SetupComputerIO();
-  if (Serial) { Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush(); }
+  //if (Serial) { Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush(); }
+  //SetupComputerIO();
+  //if (Serial) { Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush(); }
 
   output_wrapper.reset();
 
@@ -87,9 +104,6 @@ void setup() {
   
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
-    //setup_output(&output_wrapper);
-    //output_processor = new FullDrumKitMIDIOutputProcessor(&output_wrapper);
-    //output_processor = new HalfDrumKitMIDIOutputProcessor(&output_wrapper);
     output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
     setup_sequencer();
     output_processor->configure_sequencer(sequencer);
@@ -137,6 +151,9 @@ void setup() {
   #endif
   started = true;
 
+  add_repeating_timer_ms(5, parameter_repeating_callback, nullptr, &parameter_timer);
+  add_repeating_timer_ms(1, usb_repeating_callback, nullptr, &usb_timer);
+        
   if (Serial) { Serial.println(F("setup() done - starting!")); }
 
 }
@@ -277,18 +294,18 @@ void process_serial_input() {
 
 void loop() {
 
-  #ifdef USE_TINYUSB
+  /*#ifdef USE_TINYUSB
     ATOMIC() {
       USBMIDI.read();
     }
-  #endif
+  #endif*/
 
-  ATOMIC() 
+  ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
       ticked = update_clock_ticks();
   }
 
-  ATOMIC() 
+  ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
     if (output_processor->is_enabled()) {
         output_processor->loop();
@@ -296,9 +313,9 @@ void loop() {
   }
 
   if (cv_input_enabled) {
-    if (parameter_manager->ready_for_next_update()) {
+    /*if (ticked && parameter_manager->ready_for_next_update()) {
         parameter_manager->throttled_update_cv_input__all(5, false, false);
-    }
+    }*/
 
     if (ticked && debug_enable_output_parameter_input) 
       parameter_manager->output_parameter_representation();
@@ -307,7 +324,8 @@ void loop() {
   }
 
   //if (ticked) 
-  ATOMIC() {
+  ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
+  {
     process_serial_input();
   }
 
