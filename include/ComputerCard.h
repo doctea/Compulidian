@@ -30,9 +30,9 @@ See examples/ directory
 
 class ComputerCard
 {
-	constexpr static int numLeds = 6;
-	constexpr static uint8_t leds[numLeds] = { 10, 11, 12, 13, 14, 15 };
+	constexpr static uint8_t leds[] = { 10, 11, 12, 13, 14, 15 };
 public:
+	constexpr static int numLeds = sizeof(leds) / sizeof(leds[0]);
 
 	/// Knob index, used by KnobVal
 	enum Knob {Main, X, Y};
@@ -152,6 +152,7 @@ public:
 		gpio_put(PULSE_2_RAW_OUT, !val);
 	}
 	
+	public:
 	/// Return audio in (-2048 to 2047)
 	int16_t __not_in_flash_func(AudioIn)(int i){return i?adcInR:adcInL;}
 	
@@ -161,7 +162,6 @@ public:
 	/// Return audio in 1 (-2048 to 2047)
 	int16_t __not_in_flash_func(AudioIn2)(){return adcInR;}
 
-public:
 	/// Return CV in (-2048 to 2047)
 	int16_t __not_in_flash_func(CVIn)(int i){return cv[i];}
 	

@@ -76,6 +76,11 @@ void setup_parameter_inputs() {
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(5, &sw, 3, 5.0, false));    // switch ?
     //parameter_manager->voltage_sources->tail()->debug = true; // switch
 
+    #ifdef ENABLE_SHUFFLE
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(6, &sw, 6, 8.0, false));    // audio in 1 used as CV
+        parameter_manager->addVoltageSource(new ComputerCardVoltageSource(7, &sw, 7, 8.0, false));    // audio in 2 used as CV
+    #endif
+
     // initialise the voltage source inputs
     // CVs are bipolar input, knobs are unipolar
     Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
@@ -86,8 +91,6 @@ void setup_parameter_inputs() {
     VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, BIPOLAR, true);    
     Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
     VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.01, UNIPOLAR, true);    
-
-    // it thinks switch is down!!
 
     //VoltageParameterInput *vpi_switch = new VoltageParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, false);    
     ThresholdToggleParameterInput *vpi_hold_switch = new ThresholdToggleParameterInput(
@@ -123,6 +126,11 @@ void setup_parameter_inputs() {
     ); 
     //vpi_mome_switch->debug = true;
     
+    #ifdef ENABLE_SHUFFLE
+        VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
+        VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
+    #endif
+
     //parameter_manager->voltage_sources->get(0)->debug = true;
 
     /*
@@ -141,6 +149,10 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(vpi_knob_y);
     parameter_manager->addInput(vpi_hold_switch);
     parameter_manager->addInput(vpi_mome_switch);
+    #ifdef ENABLE_SHUFFLE
+        parameter_manager->addInput(vpi_audio_in_1);
+        parameter_manager->addInput(vpi_audio_in_2);
+    #endif
 
     /*VirtualParameterInput *virtpi1 = new VirtualParameterInput((char*)"LFO sync", "LFOs", LFO_LOCKED);
     VirtualParameterInput *virtpi2 = new VirtualParameterInput((char*)"LFO free", "LFOs", LFO_FREE);
@@ -155,7 +167,16 @@ void setup_parameter_inputs() {
     Serial.println("just did do setDefaultParameterConnections().."); Serial.flush();
     */
 
-    FloatParameter *euclidian_density = sequencer->getParameters()->get(0);
+    int parameter_index = 0;
+    #ifdef ENABLE_SHUFFLE
+        FloatParameter *shuffle_amount_parameter = sequencer->getParameters()->get(parameter_index);
+        shuffle_amount_parameter->set_slot_0_input(vpi_audio_in_1);
+        shuffle_amount_parameter->set_slot_0_amount(1.0f);
+        shuffle_amount_parameter->set_slot_0_polarity(BIPOLAR);
+        parameter_index++;
+    #endif
+
+    FloatParameter *euclidian_density = sequencer->getParameters()->get(parameter_index++);
     //euclidian_density->debug = true;
     euclidian_density->set_slot_0_input(vpi_knob_main);
     euclidian_density->set_slot_0_amount(1.0f);
@@ -164,7 +185,7 @@ void setup_parameter_inputs() {
     euclidian_density->set_slot_1_amount(1.0f);
     euclidian_density->set_slot_1_polarity(BIPOLAR);
 
-    FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(1);
+    FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(parameter_index++);
     //euclidian_density_2->debug = true;
     euclidian_density_2->set_slot_0_input(vpi_knob_x);
     euclidian_density_2->set_slot_0_amount(1.0f);
@@ -189,7 +210,7 @@ void setup_parameter_inputs() {
                 set_bpm(v);
             }
         },
-        [=]() -> float { return get_bpm(); },                
+        [=]() -> float { return get_bpm(); },
         KNOB_MIN_BPM, KNOB_MAX_BPM
     );
     bpm_parameter->set_slot_0_input(vpi_knob_y);

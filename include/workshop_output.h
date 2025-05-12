@@ -9,21 +9,18 @@
 #include "Drums.h"
 
 #include <SimplyAtomic.h>
-
-#include "ComputerCard.h"
-
-extern SamplePlayer sw;
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
   //uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 
-  const int NUM_LEDS = 6;
-
   public:
     bool muted = false;
     bool debug = false;
+    ComputerCard *sw = nullptr;
 
-    WorkshopOutputWrapper() {}
+    WorkshopOutputWrapper(ComputerCard *sw) {
+        this->sw = sw;
+    }
 
     void set_muted(bool muted) {
         this->muted = muted;
@@ -40,28 +37,28 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
     }
 
     void all_leds_on() {
-        for (int i = 0 ; i < NUM_LEDS ; i++) {
-            sw.LedOn(i);
+        for (int i = 0 ; i < sw->numLeds ; i++) {
+            sw->LedOn(i);
         }
     }
     void all_leds_off() {
-        for (int i = 0 ; i < NUM_LEDS ; i++) {
-            sw.LedOff(i);
+        for (int i = 0 ; i < sw->numLeds ; i++) {
+            sw->LedOff(i);
         }
     }
     void all_gates_off() {
-        for (int i = 0 ; i < NUM_LEDS ; i++) {
+        for (int i = 0 ; i < sw->numLeds ; i++) {
             gateWrite(i, LOW);
-            sw.LedOff(i);
+            sw->LedOff(i);
         }
     }
 
     // output to Pulse1+2 outputs and CV1+2 outputs
     void gateWrite(int output_number, bool value) {
         if (output_number == 0 || output_number == 1) {
-            sw.PulseOut(output_number, value);
+            sw->PulseOut(output_number, value);
         } else if (output_number == 2 || output_number == 3) {
-            sw.CVOut(output_number-2, value ? 2047 : 0);   // invert CV output
+            sw->CVOut(output_number-2, value ? 2047 : 0);
         }
     }
 
@@ -138,7 +135,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             }
 
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            sw.LedOn(output_number % NUM_LEDS);
+            sw->LedOn(output_number % sw->numLeds);
 
             gateWrite(output_number, HIGH);
         }
@@ -161,7 +158,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
 
         if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            sw.LedOff(output_number % NUM_LEDS);
+            sw->LedOff(output_number % sw->numLeds);
 
             gateWrite(output_number, LOW);
         }
