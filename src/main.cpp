@@ -168,7 +168,7 @@ void setup() {
   started = true;
 
   add_repeating_timer_ms(5, parameter_repeating_callback, nullptr, &parameter_timer);
-  add_repeating_timer_ms(1, usb_repeating_callback, nullptr, &usb_timer);
+  add_repeating_timer_us(200, usb_repeating_callback, nullptr, &usb_timer);
         
   if (Serial) { Serial.println(F("setup() done - starting!")); }
 
