@@ -45,6 +45,8 @@ public:
     volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to processing in interrupt on second core
     volatile bool enable_volume = false; // default to volume disabled
 
+    volatile int global_pitch = 4096; // default to normal pitch
+
     void __not_in_flash_func(CalculateSamples)() {
         for (int_fast8_t track = 0 ; track < NUM_VOICES ; ++track) {  // look for samples that are playing, scale their volume, and add them up
             uint_fast32_t index;
@@ -65,7 +67,8 @@ public:
                 if (enable_volume) 
                     newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
                 samplesum+=newsample;
-                voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
+                //voice[track].sampleindex+=voice[track].sampleincrement; // add step increment
+                voice[track].sampleindex+=global_pitch; // add step increment
             }
         }
 

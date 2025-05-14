@@ -22,12 +22,15 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 
 ### CV, Knob and Switch controls
 
-^ Input             ^ Function                                                                                                        ^
+| Input             | Function                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
 | Main knob + CV1   | Control density multiplier of the first bank of Euclidean tracks (kick, clap, snare, toms...), from 0x to 1.5x  |
 | X knob + CV2      | Control density multiplier of the second bank of Euclidian tracks (hihats...), from 0x to 1.5x                  |
 | Y knob            | Controls tempo of internal clock, from 30BPM to 180 (disabled when slaved to external clock).                   |
 | Switch UP (hold)  | Freeze the random seed, so same pattern will continue playing.  Fills and density still take effect.            |
 | Switch DOWN (mom) | Mutes the sequencer so no new notes will play.  LEDs will flash on the beat.                                    |
+| Audio In 1        | Bipolar CV controls shuffle amount (negative CV inverts the shuffle)                                            |
+| Audio In 2        | Bipolar CV controls sampleplayer pitch (negative lower, positive higher)                                        |
 
 ### MIDI features
 

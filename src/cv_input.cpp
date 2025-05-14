@@ -217,6 +217,29 @@ void setup_parameter_inputs() {
     bpm_parameter->set_slot_0_amount(1.0f);
     bpm_parameter->set_slot_0_polarity(UNIPOLAR);
     parameter_manager->addParameter(bpm_parameter);
+
+    /*LDataParameter<float> *pitch_parameter = new LDataParameter<float>(
+        (char*)"Pitch", 
+        [=](float v) -> void {
+            sw.global_pitch = 4096.0 * v;
+            Serial.printf("Got v %f, so global_pitch set to %i\n", v, sw.global_pitch);
+        },
+        [=]() -> float { return sw.global_pitch / 4096; },
+        0.5, 1.5
+    );*/
+    LDataParameter<int16_t> *pitch_parameter = new LDataParameter<int16_t>(
+        (char*)"Pitch", 
+        [=](int16_t v) -> void {
+            sw.global_pitch = v;
+            //Serial.printf("Setting global_pitch to %i\n", sw.global_pitch);
+        },
+        [=]() -> int16_t { return sw.global_pitch; },
+        (2048), (4096+2048)
+    );
+    pitch_parameter->set_slot_0_input(vpi_audio_in_2);
+    pitch_parameter->set_slot_0_amount(1.0f);
+    pitch_parameter->set_slot_0_polarity(UNIPOLAR);
+    parameter_manager->addParameter(pitch_parameter);
     
     tft_print("Finished setup_parameter_inputs()\n");
 }
