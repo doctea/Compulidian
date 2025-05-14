@@ -79,8 +79,8 @@ bool usb_repeating_callback(repeating_timer_t *rt) {
 }
 
 #ifdef ENABLE_SHUFFLE
-  void shuffled_track_callback(uint8_t track, uint32_t step) {
-    sequencer->on_step_shuffled(track, step);
+  void shuffled_step_callback(uint32_t step) {
+    sequencer->on_step_shuffled(0, step);
   }
 #endif
 
@@ -104,17 +104,16 @@ void setup() {
 
   setup_samples();
 
-  setup_uclock(do_tick, uClock.PPQN_24);
+  setup_uclock(do_tick, uClock.PPQN_96);
   set_global_restart_callback(global_on_restart);
 
   #ifdef ENABLE_SHUFFLE
     // set up shuffle pattern
-    int8_t shuffle_75[2] = {0, 12};
+    int8_t shuffle_75[] = {0, 12, 0, 12, 0, 12, 0, 12};
     shuffle_pattern_wrapper[0]->set_amount(0.5);
-    shuffle_pattern_wrapper[0]->set_steps(shuffle_75, 2);
+    shuffle_pattern_wrapper[0]->set_steps(shuffle_75, sizeof(shuffle_75));
     shuffle_pattern_wrapper[0]->set_active(true);
-    uClock.setTrackOnStep(shuffled_track_callback);
-    //uClock.setTrackShuffle(0, true);
+    uClock.setOnStep(shuffled_step_callback);
   #endif
 
   if (Serial) { Serial.println(F("done setup_uclock()")); }
@@ -247,10 +246,14 @@ void process_serial_input() {
             Serial.printf("pattern %i: null\n", i);
           }*/
         } 
+      } else if (serial_input_buffer[0]=='f') {
+        // toggle fills_enabled
+        if (Serial) Serial.printf("f command received - fills_enabled was %s!\n", sequencer->is_fills_enabled() ? "true" : "false");
+        sequencer->set_fills_enabled(!sequencer->is_fills_enabled());
+        if (Serial) Serial.printf("f command received - fills_enabled is now %s!\n", sequencer->is_fills_enabled() ? "true" : "false");
       } else if (serial_input_buffer[0]=='I') {
         Serial.println(F("I command received!"));
         debug_enable_output_parameter_input = !debug_enable_output_parameter_input;
-
       } else if (serial_input_buffer[0]=='d' || serial_input_buffer[0]=='D') {
         Serial.println(F("d command received!"));
         if (serial_input_buffer[1]=='p') {
