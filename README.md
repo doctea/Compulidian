@@ -52,6 +52,7 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 
 - Seems like ADC reads are a bit wobbly when higher CPU used; reducing number of voices seems to improve stability
 - Having to overclock to 220mhz to get 16 voices to play within sample time.
+- Modulating shuffle seems to upset the clock timing, maybe?
 
 ## Future plans
 
