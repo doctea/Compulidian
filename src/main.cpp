@@ -227,13 +227,15 @@ void process_serial_input() {
 
       if (serial_input_buffer[0]=='l') {
         // list the track names
-        Serial.println(F("l command received!"));
+        Serial.println("l command received!"); Serial.flush();
         for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          //Serial.printf("Pattern %i/%i\n", i+1, sequencer->number_patterns); Serial.flush();
           SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
-          Serial.printf("Pattern %i: %s\n", i, p->get_output_label());
+          Serial.printf("Pattern [%i/%i]:\t%s\n", i+1, sequencer->number_patterns, p->get_output_label()); Serial.flush();
         }
         for (int i = 0 ; i < NUM_VOICES ; i++) {
-          Serial.printf("Voice %i: %s on %i (%s)\n", i, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
+          Serial.printf("Voice [%i/%i]:\t%s on %i (%s)\n", i+1, NUM_VOICES, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
+          Serial.flush();
         }
       } else if (serial_input_buffer[0]=='p') {
         Serial.println(F("p command received!"));
@@ -344,7 +346,7 @@ void loop() {
   }
 
   //if (ticked) 
-  ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
+  //ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
     process_serial_input();
   }
