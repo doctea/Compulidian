@@ -41,12 +41,14 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 - Backspace/delete etc don't currently work so don't make any typos!
 - Press `tab`+ `enter` to repeat the previous command.
 
-^ Command           ^ Function ^
+| Command           | Function                                                                    |
+| ----------------- | --------------------------------------------------------------------------- |
 | `l`               | List tracks and sample names                                                |
 | `p <output_name>` | Trigger the pattern of the given name (eg Kick, Stick, Clap..)              |
 | `s`               | Toggle sample interpolation (trade off audio quality vs CPU)                |
 | `c`               | Toggle between audio generation in interrupt (HQ) vs main loop 'dirty' mode |
 | `v`               | Toggle voice/sample volume honouring (doesn't seem to make much diff)       |
+| `f`               | Toggle fills on/off                                                         |
 
 ## Problems
 
