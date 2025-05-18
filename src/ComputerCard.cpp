@@ -81,13 +81,14 @@ void __not_in_flash_func(ComputerCard::AudioWorker)()
 			adc_select_input(0);
 			adc_set_round_robin(0b0001111U);
 			adc_run(true);
+
 		}
 		else if (runADCMode == RUN_ADC_MODE_ADC_STOPPED)
 		{
 			break;
 		}
 		   
-
+		CalculateSamples();
 	}
 }
 

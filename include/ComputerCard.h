@@ -65,9 +65,9 @@ protected:
 	/// Callback, called once per sample at 48kHz
 	virtual void ProcessSample() = 0;
 
-
-
 public:
+	virtual void CalculateSamples() = 0;
+
 	/// Read knob position (returns 0-4095)
 	int32_t __not_in_flash_func(KnobVal)(Knob ind) {return knobs[ind];}
 
