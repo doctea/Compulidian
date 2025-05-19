@@ -67,6 +67,7 @@ protected:
 
 public:
 	virtual void CalculateSamples() = 0;
+	virtual void AudioWorkerLoop() {};
 
 	/// Read knob position (returns 0-4095)
 	int32_t __not_in_flash_func(KnobVal)(Knob ind) {return knobs[ind];}

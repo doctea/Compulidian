@@ -88,7 +88,8 @@ void __not_in_flash_func(ComputerCard::AudioWorker)()
 			break;
 		}
 		   
-		CalculateSamples();
+		//if (calculate_mode == IN_PROCESS_SAMPLE) CalculateSamples();
+		AudioWorkerLoop();
 	}
 }
 
@@ -133,13 +134,18 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	int cvi = mux_state % 2;
 
 	// Attempted compensation of ADC DNL errors. Not really tested.
-	uint16_t adc512=ADC_Buffer[cpuPhase][3]+512;
-	if (!(adc512 % 0x01FF)) ADC_Buffer[cpuPhase][3] += 4;
-	ADC_Buffer[cpuPhase][3] += (adc512>>10) << 3;
+	#ifdef COMPENSATE_ADC_DNL
+		uint16_t adc512=ADC_Buffer[cpuPhase][3]+512;
+		if (!(adc512 % 0x01FF)) ADC_Buffer[cpuPhase][3] += 4;
+		ADC_Buffer[cpuPhase][3] += (adc512>>10) << 3;
+	#endif
 	
-	cvsm[cvi] = (15 * (cvsm[cvi]) + 16 * ADC_Buffer[cpuPhase][3]) >> 4;
-	cv[cvi] = 2048 - (cvsm[cvi] >> 4);
-
+	#ifdef COMPENSATE_ADC_LPF_CV
+		cvsm[cvi] = (15 * (cvsm[cvi]) + 16 * ADC_Buffer[cpuPhase][3]) >> 4;
+		cv[cvi] = 2048 - (cvsm[cvi] >> 4);
+	#else
+		cv[cvi] = 2048 - ADC_Buffer[cpuPhase][3];
+	#endif
 
 	// Set audio inputs, by averaging the two samples collected.
 	// Invert to counteract inverting op-amp input configuration
@@ -155,8 +161,13 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 
 	// Set knobs, with ~60Hz LPF
 	int knob = mux_state;
-	knobssm[knob] = (127 * (knobssm[knob]) + 16 * ADC_Buffer[cpuPhase][6]) >> 7;
-	knobs[knob] = knobssm[knob] >> 4;
+
+	#ifdef COMPENSATE_ADC_LPF_KNOB
+		knobssm[knob] = (127 * (knobssm[knob]) + 16 * ADC_Buffer[cpuPhase][6]) >> 7;
+		knobs[knob] = knobssm[knob] >> 4;
+	#else
+		knobs[knob] = ADC_Buffer[cpuPhase][6];
+	#endif
 
 	// Set switch value
 	switchVal = static_cast<Switch>((knobs[3]>1000) + (knobs[3]>3000));
@@ -170,7 +181,7 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	////////////////////////////
 	// Normalisation probe
 
-	if (useNormProbe)
+	if (false && useNormProbe)
 	{
 		// Set normalisation probe output value
 		// and update np to the expected history string
