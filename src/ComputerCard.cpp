@@ -181,7 +181,7 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	////////////////////////////
 	// Normalisation probe
 
-	if (false && useNormProbe)
+	if (useNormProbe)
 	{
 		// Set normalisation probe output value
 		// and update np to the expected history string
