@@ -82,6 +82,21 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
                 return 7;
             case GM_NOTE_TAMBOURINE:
                 return 8;
+            case GM_NOTE_LOW_TOM:
+                return 9;
+            case GM_NOTE_RIDE_BELL:
+                return 10;
+            case GM_NOTE_CLAVES:
+                return 11;
+            case GM_NOTE_RIDE_CYMBAL_1:
+                return 12;
+            case GM_NOTE_VIBRA_SLAP:
+                return 13;
+            case GM_NOTE_SPLASH_CYMBAL:
+                return 14;
+            // todo: add more outputs here
+            default:
+                return 15;            
         }
         return -1;
     }
