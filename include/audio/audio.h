@@ -65,7 +65,7 @@ public:
                             samp0=sample[tracksample].samplearray[index]; // get the first sample to interpolate
                             samp1=sample[tracksample].samplearray[index+1];// get the second sample
                             delta=samp1-samp0;
-                            newsample=(int_fast32_t)samp0+((int_fast32_t)delta*((int_fast32_t)voice[track].sampleindex & 0x0fff))/4096; // interpolate between the two samples
+                            newsample=(int_fast32_t)samp0+((int_fast32_t)delta*((int_fast32_t)voice[track].sampleindex & 0x0fff))/global_pitch; // interpolate between the two samples
                         } else {
                             newsample=sample[tracksample].samplearray[index]; // get the first sample to interpolate
                         }
@@ -101,11 +101,7 @@ public:
     }
 
     virtual void __not_in_flash_func(ProcessSample)()
-	{
-        /*if (calculate_mode == IN_PROCESS_SAMPLE) {
-            CalculateSamples();
-        }*/
-        
+	{       
 		AudioOut1(buffer[read_buffer_id][bufferIndex]);
 		AudioOut2(buffer[read_buffer_id][bufferIndex]);
 

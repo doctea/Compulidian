@@ -24,7 +24,11 @@ void __not_in_flash_func(ComputerCard::AudioWorker)()
 	// ADC clock runs at 48MHz
 	// 48MHz ÷ (124+1) = 384kHz ADC sample rate
 	//                 = 8×48kHz audio sample rate
-	adc_set_clkdiv(124);
+	//adc_set_clkdiv(124);	// 48khz
+	//adc_set_clkdiv(137);	// 44.1khz
+	adc_set_clkdiv(180);	// ~33.075khz? -- basically glitch-free
+	//adc_set_clkdiv(248);	// 24khz
+	//adc_set_clkdiv(271);	// 22.05khz
 
 	// claim and setup DMAs for reading to ADC, and writing to SPI DAC
 	adc_dma = dma_claim_unused_channel(true);
@@ -88,7 +92,6 @@ void __not_in_flash_func(ComputerCard::AudioWorker)()
 			break;
 		}
 		   
-		//if (calculate_mode == IN_PROCESS_SAMPLE) CalculateSamples();
 		AudioWorkerLoop();
 	}
 }
@@ -108,8 +111,8 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	static int norm_probe_count = 0;
 
 	// Internal variables for IIR filters on knobs/cv
-	static volatile int32_t knobssm[4] = { 0, 0, 0, 0 };
-	static volatile int32_t cvsm[2] = { 0, 0 };
+	static int32_t knobssm[4] = { 0, 0, 0, 0 };
+	static int32_t cvsm[2] = { 0, 0 };
 	__attribute__((unused)) static int np = 0, np1 = 0, np2 = 0;
 
 	adc_select_input(0);
