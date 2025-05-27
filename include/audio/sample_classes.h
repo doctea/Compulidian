@@ -15,6 +15,9 @@ class SampleDataArray : public BaseSampleData {
     public:
         SampleDataArray(const int16_t *array, uint16_t size) : sample_array(array), sample_size(size) {}
         
+        // todo: override [] operator for easier access to samples
+        // todo: interpolate samples
+
         inline virtual int16_t get_sample(uint32_t index) override {
             if (index < sample_size) {
                 return sample_array[index];
