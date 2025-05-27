@@ -3,6 +3,8 @@
 #include "audio/audio.h"
 //#include "computer.h"
 
+BaseSampleData **sample_data = nullptr;
+
 #include <atomic>
 
 extern std::atomic<bool> started;
@@ -102,10 +104,16 @@ int NUM_VOICES = sizeof(voice)/sizeof(voice[0]); // number of voices in the syst
 #include "audio/samps.h"
 
 void setup_samples() {
+    // allocate space for the pointers to sample data objects
+    sample_data = (BaseSampleData**)calloc(NUM_SAMPLES, sizeof(BaseSampleData*));
+
     for (int i = 0; i < NUM_VOICES; i++) { // silence all voices by setting sampleindex to last sample
         voice[i].sampleindex=sample[voice[i].sample].samplesize<<12; // sampleindex is a 20:12 fixed point number
         voice[i].level=sample[voice[i].sample].play_volume / 8; // set the level to the sample level
-    } 
+
+        // set the sample_data array up to point to a SampleData wrapper object
+        sample_data[voice[i].sample] = new SampleDataArray(sample[voice[i].sample].samplearray, sample[voice[i].sample].samplesize);
+    }
 }
 
 SamplePlayer sw;

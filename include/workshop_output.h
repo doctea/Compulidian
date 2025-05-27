@@ -122,7 +122,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
             }
         }
 
-        return -1;        
+        return -1;
     }
 
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {

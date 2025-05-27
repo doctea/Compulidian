@@ -16,6 +16,10 @@ struct sample_t {
 
 extern sample_t sample[]; // array of samples
 
+#include "audio/sample_classes.h"
+
+extern BaseSampleData **sample_data; // array of sample data objects
+
 #if SAMPLESET==GM
     #include "GMSamples/samples.h"
 #elif SAMPLESET==R808

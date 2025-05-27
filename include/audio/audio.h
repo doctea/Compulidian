@@ -59,15 +59,15 @@ public:
                 
                     tracksample=voice[track].sample; // precompute for a little more speed below
                     index=voice[track].sampleindex>>12; // get the integer part of the sample increment
-                    if (index <= sample[tracksample].samplesize) { // if sample is playing
+                    if (index < sample_data[tracksample]->size()) { // if sample is playing
                         //Serial.printf("track %i is playing sample %i\n", track, tracksample); Serial.flush();
                         if (interpolate_enabled) {  // do interpolation   
-                            samp0=sample[tracksample].samplearray[index]; // get the first sample to interpolate
-                            samp1=sample[tracksample].samplearray[index+1];// get the second sample
+                            samp0 = sample_data[tracksample]->get_sample(index); // get the first sample to interpolate
+                            samp1 = sample_data[tracksample]->get_sample(index + 1); // get the second sample
                             delta=samp1-samp0;
                             newsample=(int_fast32_t)samp0+((int_fast32_t)delta*((int_fast32_t)voice[track].sampleindex & 0x0fff))/global_pitch; // interpolate between the two samples
                         } else {
-                            newsample=sample[tracksample].samplearray[index]; // get the first sample to interpolate
+                            newsample = sample_data[tracksample]->get_sample(index); // get the first sample to interpolate
                         }
                         if (enable_volume) 
                             newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
