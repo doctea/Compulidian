@@ -104,7 +104,7 @@ void setup() {
 
   setup_samples();
 
-  setup_uclock(do_tick, uClock.PPQN_96);
+  setup_uclock(do_tick, uClock.PPQN_24);
   set_global_restart_callback(global_on_restart);
 
   #ifdef ENABLE_SHUFFLE

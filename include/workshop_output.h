@@ -9,8 +9,7 @@
 #include "Drums.h"
 
 #include <SimplyAtomic.h>
-class WorkshopOutputWrapper : public IMIDINoteAndCCTarget  {
-
+class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
   //uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 
   public:

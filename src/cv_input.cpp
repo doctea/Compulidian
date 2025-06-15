@@ -102,12 +102,12 @@ void setup_parameter_inputs() {
         //-0.4, // under 0.4, switch is HELD
         0.0003,
         [=](bool state) -> void { 
-            Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
+            if (Serial) Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
             if (!state) {
-                Serial.printf("Hold switch going OFF - seed was %u\n", sequencer->get_euclidian_seed());
+                if (Serial) Serial.printf("Hold switch going OFF - seed was %u\n", sequencer->get_euclidian_seed());
             }
             sequencer->set_euclidian_seed_lock(state);
-            Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
+            if (Serial) Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
         }
     ); 
     //vpi_hold_switch->debug = true;
@@ -119,8 +119,8 @@ void setup_parameter_inputs() {
         true, 
         //0.7, // over 0.7, switch is MOMENTARY
         -0.00005,
-        [=](bool state) -> void { Serial.
-            printf("Momentary switch %s\n", state ? "ON" : "OFF"); 
+        [=](bool state) -> void { 
+            //if (Serial) Serial.printf("Momentary switch %s\n", state ? "ON" : "OFF");
             output_wrapper.set_muted(state);
         }
     ); 
