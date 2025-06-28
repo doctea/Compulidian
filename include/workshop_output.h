@@ -125,6 +125,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
     }
 
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
+        //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i)\n", pitch, velocity, channel);
         if (this->muted) {
             return;
         }

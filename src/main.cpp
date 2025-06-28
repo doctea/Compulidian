@@ -88,7 +88,7 @@ bool usb_repeating_callback(repeating_timer_t *rt) {
 
 void setup() {
 
-  set_sys_clock_khz(220000, true);
+  set_sys_clock_khz(180000, true);
 
   #ifdef USE_TINYUSB
     setup_serial();
@@ -340,6 +340,7 @@ void __not_in_flash_func(loop)() {
   }
 
   #ifdef USE_TINYUSB
+    tud_task();
     //if (ticked) 
     //ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
     {
