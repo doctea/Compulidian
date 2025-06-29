@@ -2,7 +2,8 @@
 
 Made a start porting my euclidean rhythm generator + modulation libraries to a [Music Thing Workshop Computer](https://github.com/tomWhitwell/Workshop_Computer) card.
 
-https://github.com/doctea/Compulidian / Direct firmware download (UF2): https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
+https://github.com/doctea/Compulidian
+- Direct firmware download (UF2): https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
 
 Its an platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
 
