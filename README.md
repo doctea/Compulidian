@@ -1,12 +1,12 @@
 # Compulidian
 
-Made a start porting my euclidean rhythm generator + modulation libraries to a (Music Thing Workshop Computer)[https://github.com/tomWhitwell/Workshop_Computer] card.
+Made a start porting my euclidean rhythm generator + modulation libraries to a [Music Thing Workshop Computer](https://github.com/tomWhitwell/Workshop_Computer) card.
 
-https://github.com/doctea/Compulidian / https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
+https://github.com/doctea/Compulidian / Direct firmware download (UF2): https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
 
 Its an platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
 
-Uses my (parameters)[https://github.com/doctea/parameters], (midihelpers)[https://github.com/doctea/midihelpers] and (seqlib)[https://github.com/doctea/seqlib] libraries.  Uses (uClock)[https://github.com/midilab/uClock] for clock generation.  Borrows heavily from (rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player)[https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player] for the sample player, but intend to replace this with something a bit more robust and easier to replace the samples on.
+Uses my [parameters](https://github.com/doctea/parameters), [midihelpers](https://github.com/doctea/midihelpers) and [seqlib](https://github.com/doctea/seqlib) libraries.  Uses [uClock](https://github.com/midilab/uClock) for clock generation.  Borrows heavily from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player) for the sample player, but intend to replace this with something a bit more robust and easier to replace the samples later on.
 
 See `platform.io` `build_flags` and `include/Config.h` for some settings.
 
@@ -59,6 +59,7 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 - Having to overclock to 220mhz to get 16 voices to play within sample time.
 - Modulating shuffle seems to upset the clock timing, maybe?
 - Intermittent crashing when attempting to output to Serial
+- Receiving external MIDI clock seems to glitch/freeze/miss clocks for a few seconds after MIDI start is received
 
 ## Future plans
 
