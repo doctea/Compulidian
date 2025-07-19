@@ -5,11 +5,13 @@ Made a start porting my euclidean rhythm generator + modulation libraries to a [
 https://github.com/doctea/Compulidian
 - Direct firmware download (UF2): https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
 
-Its an platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
+Its a platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
 
-Uses my [parameters](https://github.com/doctea/parameters), [midihelpers](https://github.com/doctea/midihelpers) and [seqlib](https://github.com/doctea/seqlib) libraries.  Uses [uClock](https://github.com/midilab/uClock) for clock generation.  Borrows heavily from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player) for the sample player, but intend to replace this with something a bit more robust and easier to replace the samples later on.
+- Uses my [parameters](https://github.com/doctea/parameters), [midihelpers](https://github.com/doctea/midihelpers) and [seqlib](https://github.com/doctea/seqlib) libraries.
+- Uses (patched) [uClock](https://github.com/midilab/uClock) for clock generation.
+- Sample player adapted from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player).
 
-See `platform.io` `build_flags` and `include/Config.h` for some settings.
+See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 
 ## Basic features
 
