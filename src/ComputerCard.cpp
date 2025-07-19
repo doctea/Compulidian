@@ -26,8 +26,8 @@ void __not_in_flash_func(ComputerCard::AudioWorker)()
 	//                 = 8×48kHz audio sample rate
 	//adc_set_clkdiv(124);	// 48khz
 	//adc_set_clkdiv(137);	// 44.1khz
-	adc_set_clkdiv(180);	// ~33.075khz? -- basically glitch-free
-	//adc_set_clkdiv(248);	// 24khz
+	//adc_set_clkdiv(180);	// ~33.075khz? -- basically glitch-free
+	adc_set_clkdiv(248);	// 24khz
 	//adc_set_clkdiv(271);	// 22.05khz
 
 	// claim and setup DMAs for reading to ADC, and writing to SPI DAC

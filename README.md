@@ -52,11 +52,12 @@ See `platform.io` `build_flags` and `include/Config.h` for some settings.
 | `c`               | Toggle between audio generation in interrupt (HQ) vs main loop 'dirty' mode |
 | `v`               | Toggle voice/sample volume honouring (doesn't seem to make much diff)       |
 | `f`               | Toggle fills on/off                                                         |
+| `V`		    | Output build date/time and branch/commit info				  |
 
 ## Known problems
 
-- FIXED by reducing samplerate? Seems like ADC reads are a bit wobbly when higher CPU used; reducing number of voices seems to improve stability
-- Having to overclock to 220mhz to get 16 voices to play within sample time.
+- (IMPROVED by reducing samplerate) Seems like ADC reads are a bit wobbly when higher CPU used; reducing number of voices seems to improve stability
+- (WORKED AROUND by dropping samplerate) Having to overclock to 220mhz to get 16 voices to play within sample time.
 - Modulating shuffle seems to upset the clock timing, maybe?
 - Intermittent crashing when attempting to output to Serial
 

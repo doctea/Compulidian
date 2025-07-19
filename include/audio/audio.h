@@ -34,7 +34,7 @@ public:
     volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to processing in interrupt on second core
     volatile bool enable_volume = false; // default to volume disabled
 
-    volatile int global_pitch = 4096; // default to normal pitch
+    volatile int global_pitch = 2048; // default to normal pitch
 
     static const int BUFFER_SIZE = 128;
     volatile int_fast32_t buffer[2][BUFFER_SIZE];
