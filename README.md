@@ -67,16 +67,13 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 
 ## Future plans
 
-- (in progress, currently a bastardised hybrid) convert to a ComputerCard to take advantage of normalisation probes, better input reading, and better sound production
-- very lofi audio quality with bad aliasing problems when in 'main loop dirty mode' -- has some charm to it so could use this as an effect
 - all the modulation possibilities need to be made to connect to sensible things;
 - make modulation/knob/parameter mapping configurable (maybe via WebUSB?)
-- use audio inputs as extra CV inputs
 - slave to external CV clock and reset
 - option to send LFOs/envelopes out on CV, instead of using them as gates?
 - i also have some code for generating scale-quantised bassline patterns based on the generated euclidian patterns if that would be interesting to anyone
-  - or could maybe output a bassline on the second output
-- enable selection of initial seed so can choose many variations of the default pattern?
+  - or could maybe output a bassline on the second audio output
+- enable selection of initial seed so can choose many variations of the default pattern?  maybe use unique card serial number for this?
 - add more default patterns than four-on-floor that can be chosen somehow (eg breakbeat patterns)
 
 open to collaboration and welcome feedback 🙂
