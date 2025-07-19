@@ -32,8 +32,8 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 | Y knob            | Controls tempo of internal clock, from 30BPM to 180 (disabled when slaved to external clock).                   |
 | Switch UP (hold)  | Freeze the random seed, so same pattern will continue playing.  Fills and density still take effect.            |
 | Switch DOWN (mom) | Mutes the sequencer so no new notes will play.  LEDs will flash on the beat.                                    |
-| Audio In 1        | Bipolar CV controls shuffle amount (negative CV inverts the shuffle)                                            |
-| Audio In 2        | Bipolar CV controls sampleplayer pitch (negative lower, positive higher)                                        |
+| Audio In 1 (CV)   | Bipolar CV controls shuffle amount (negative CV inverts the shuffle)                                            |
+| Audio In 2 (CV)   | Bipolar CV controls sampleplayer pitch (negative lower, positive higher)                                        |
 
 ### MIDI features
 
