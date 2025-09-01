@@ -75,7 +75,7 @@ void global_on_restart() {
 #ifdef USE_TINYUSB
   repeating_timer_t usb_timer;
   bool usb_repeating_callback(repeating_timer_t *rt) {
-    USBMIDI.read();
+    while(USBMIDI.read()) {}
     return true;
   }
 #endif
@@ -104,15 +104,17 @@ void setup() {
 
   setup_samples();
 
-  setup_uclock(do_tick, uClock.PPQN_24);
+  setup_uclock(do_tick);
   set_global_restart_callback(global_on_restart);
 
   #ifdef ENABLE_SHUFFLE
     // set up shuffle pattern
     int8_t shuffle_75[] = {0, 12, 0, 12, 0, 12, 0, 12};
-    shuffle_pattern_wrapper[0]->set_amount(0.5);
     shuffle_pattern_wrapper[0]->set_steps(shuffle_75, sizeof(shuffle_75));
-    shuffle_pattern_wrapper[0]->set_active(true);
+    //int8_t shuffle_straight[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    //shuffle_pattern_wrapper[0]->set_steps(shuffle_straight, sizeof(shuffle_straight));
+    //shuffle_pattern_wrapper[0]->set_amount(0.5);
+    //shuffle_pattern_wrapper[0]->set_active(true);
     uClock.setOnStep(shuffled_step_callback);
   #endif
 
@@ -165,7 +167,7 @@ void setup() {
     add_repeating_timer_ms(5, parameter_repeating_callback, nullptr, &parameter_timer);
   #endif
   #ifdef USE_TINYUSB
-    add_repeating_timer_us(200, usb_repeating_callback, nullptr, &usb_timer);
+    add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
   #endif
         
   if (Serial) { Serial.println(F("setup() done - starting!")); }
@@ -231,6 +233,10 @@ void __not_in_flash_func(loop)() {
     {
       process_serial_input();
     }
+
+    /*if (ticked && ticks % 6 == 0) {
+      Serial.printf("uClock reckons BPM is %3.3f, ticks is %u, playing is %s\n", uClock.getTempo(), ticks, playing ? "true" : "false");
+    }*/
   #endif
 
   // flash LEDs on the beat if muted
@@ -245,5 +251,6 @@ void __not_in_flash_func(loop)() {
     sw.CalculateSamples();
     last_sample_at_us = micros();
   }
+  
 
 }
