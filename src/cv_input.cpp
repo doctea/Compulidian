@@ -169,31 +169,27 @@ void setup_parameter_inputs() {
 
     int parameter_index = 0;
     #ifdef ENABLE_SHUFFLE
-        FloatParameter *shuffle_amount_parameter = sequencer->getParameters()->get(parameter_index);
-        shuffle_amount_parameter->set_slot_0_input(vpi_audio_in_1);
-        shuffle_amount_parameter->set_slot_0_amount(1.0f);
-        shuffle_amount_parameter->set_slot_0_polarity(BIPOLAR);
-        parameter_index++;
+        //FloatParameter *shuffle_amount_parameter = sequencer->getParameters()->get(parameter_index);
+        FloatParameter *shuffle_amount_parameter = sequencer->getParameterByName("Shuffle amount 0");   // untested
+        if (shuffle_amount_parameter==nullptr) {
+            Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
+        } else {
+            shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, BIPOLAR);
+            parameter_index++;
+        }
     #endif
 
-    FloatParameter *euclidian_density = sequencer->getParameters()->get(parameter_index++);
+    FloatParameter *euclidian_density = sequencer->getParameterByName("Global density 0");  // untested..
     //euclidian_density->debug = true;
-    euclidian_density->set_slot_0_input(vpi_knob_main);
-    euclidian_density->set_slot_0_amount(1.0f);
-    euclidian_density->set_slot_0_polarity(UNIPOLAR);
-    euclidian_density->set_slot_1_input(vpi_cv_1);
-    euclidian_density->set_slot_1_amount(1.0f);
-    euclidian_density->set_slot_1_polarity(BIPOLAR);
+    euclidian_density->set_slot_x_all(0, vpi_knob_main, 1.0f, UNIPOLAR);
+    euclidian_density->set_slot_x_all(1, vpi_cv_1, 1.0f, BIPOLAR);
 
-    FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(parameter_index++);
+    //FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(parameter_index++);
+    FloatParameter *euclidian_density_2 = sequencer->getParameterByName("Global density 1");    // untested
     //euclidian_density_2->debug = true;
-    euclidian_density_2->set_slot_0_input(vpi_knob_x);
-    euclidian_density_2->set_slot_0_amount(1.0f);
-    euclidian_density_2->set_slot_0_polarity(UNIPOLAR);
-    euclidian_density_2->set_slot_1_input(vpi_cv_2);
-    euclidian_density_2->set_slot_1_amount(1.0f);
-    euclidian_density_2->set_slot_1_polarity(BIPOLAR);
-        
+    euclidian_density_2->set_slot_x_all(0, vpi_knob_x, 1.0f, UNIPOLAR);
+    euclidian_density_2->set_slot_x_all(1, vpi_cv_2, 1.0f, BIPOLAR);
+
     /*
     FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
     //mutation_amount->debug = true;
@@ -213,9 +209,7 @@ void setup_parameter_inputs() {
         [=]() -> float { return get_bpm(); },
         KNOB_MIN_BPM, KNOB_MAX_BPM
     );
-    bpm_parameter->set_slot_0_input(vpi_knob_y);
-    bpm_parameter->set_slot_0_amount(1.0f);
-    bpm_parameter->set_slot_0_polarity(UNIPOLAR);
+    bpm_parameter->set_slot_x_all(0, vpi_knob_y, 1.0f, UNIPOLAR);
     parameter_manager->addParameter(bpm_parameter);
 
     /*LDataParameter<float> *pitch_parameter = new LDataParameter<float>(
@@ -236,9 +230,7 @@ void setup_parameter_inputs() {
         [=]() -> int16_t { return sw.global_pitch; },
         (2048), (4096+2048)
     );
-    pitch_parameter->set_slot_0_input(vpi_audio_in_2);
-    pitch_parameter->set_slot_0_amount(1.0f);
-    pitch_parameter->set_slot_0_polarity(UNIPOLAR);
+    pitch_parameter->set_slot_x_all(0, vpi_audio_in_2, 1.0f, UNIPOLAR);
     parameter_manager->addParameter(pitch_parameter);
     
     tft_print("Finished setup_parameter_inputs()\n");
