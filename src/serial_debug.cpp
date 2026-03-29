@@ -1,6 +1,10 @@
 
 #include "serial_debug.h"
 
+#include "sequencer/Base/Patterns.h"
+
+#include "sequencer/Euclidian/Sequencer.h"
+
 #ifdef USE_TINYUSB
 
   bool debug_enable_output_parameter_input = false;
@@ -34,10 +38,10 @@
         if (serial_input_buffer[0]=='l') {
           // list the track names
           Serial.println("l command received!"); Serial.flush();
-          for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          for (int i = 0 ; i < sequencer->get_number_patterns() ; i++) {
             //Serial.printf("Pattern %i/%i\n", i+1, sequencer->number_patterns); Serial.flush();
             SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
-            Serial.printf("Pattern [%i/%i]:\t%s\n", i+1, sequencer->number_patterns, p->get_output_label()); Serial.flush();
+            Serial.printf("Pattern [%i/%i]:\t%s\n", i+1, sequencer->get_number_patterns(), p->get_output_label()); Serial.flush();
           }
           for (int i = 0 ; i < NUM_VOICES ; i++) {
             Serial.printf("Voice [%i/%i]:\t%s on %i (%s)\n", i+1, NUM_VOICES, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
@@ -45,7 +49,7 @@
           }
         } else if (serial_input_buffer[0]=='p') {  // trigger named pattern
           Serial.println(F("p command received!"));
-          for (int i = 0 ; i < sequencer->number_patterns ; i++) {
+          for (int i = 0 ; i < sequencer->get_number_patterns() ; i++) {
             SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
             if (p->get_output()->matches_label(serial_input_buffer+2)) {
               Serial.printf("Triggering pattern %i: %s\n", i, p->get_output_label());
@@ -55,9 +59,9 @@
             }*/
           } 
         } else if (serial_input_buffer[0]=='f') {   // toggle fills_enabled
-          if (Serial) Serial.printf("f command received - fills_enabled was %s!\n", sequencer->is_fills_enabled() ? "true" : "false");
-          sequencer->set_fills_enabled(!sequencer->is_fills_enabled());
-          if (Serial) Serial.printf("f command received - fills_enabled is now %s!\n", sequencer->is_fills_enabled() ? "true" : "false");
+          if (Serial) Serial.printf("f command received - fills_enabled was %s!\n", ((EuclidianSequencer*)sequencer)->is_fills_enabled() ? "true" : "false");
+          ((EuclidianSequencer*)sequencer)->set_fills_enabled(!((EuclidianSequencer*)sequencer)->is_fills_enabled());
+          if (Serial) Serial.printf("f command received - fills_enabled is now %s!\n", ((EuclidianSequencer*)sequencer)->is_fills_enabled() ? "true" : "false");
         } else if (serial_input_buffer[0]=='I') {   // toggle debug on/off for output parameter inputs
           Serial.println(F("I command received!"));
           debug_enable_output_parameter_input = !debug_enable_output_parameter_input;

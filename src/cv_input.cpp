@@ -30,6 +30,7 @@ extern WorkshopOutputWrapper output_wrapper;
 #include "parameter_inputs/ThresholdToggleParameterInput.h"
 
 #include "sequencer/sequencing.h"
+#include "sequencer/Euclidian/Sequencer.h"
 
 //#include "Wire.h"
 bool cv_input_enabled = true;
@@ -104,10 +105,10 @@ void setup_parameter_inputs() {
         [=](bool state) -> void { 
             if (Serial) Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
             if (!state) {
-                if (Serial) Serial.printf("Hold switch going OFF - seed was %u\n", sequencer->get_euclidian_seed());
+                if (Serial) Serial.printf("Hold switch going OFF - seed was %u\n", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
             }
-            sequencer->set_euclidian_seed_lock(state);
-            if (Serial) Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", sequencer->is_euclidian_seed_lock() ? "ON" : "OFF", sequencer->get_euclidian_seed());
+            ((EuclidianSequencer*)sequencer)->set_euclidian_seed_lock(state);
+            if (Serial) Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", ((EuclidianSequencer*)sequencer)->is_euclidian_seed_lock() ? "ON" : "OFF", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
         }
     ); 
     //vpi_hold_switch->debug = true;

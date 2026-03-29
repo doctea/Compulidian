@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "sequencer/Euclidian.h"
+
 #include "sequencer/sequencing.h"
 #include "outputs/output_processor.h"
 
@@ -123,10 +125,11 @@ void setup() {
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
     output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
-    setup_sequencer();
+    sequencer = new EuclidianSequencer(output_processor->nodes, output_processor->nodes->size());
+    sequencer->debug = true;
     output_processor->configure_sequencer(sequencer);
-    sequencer->initialise_patterns();
-    sequencer->reset_patterns();
+    ((EuclidianSequencer*)sequencer)->initialise_patterns();
+    ((EuclidianSequencer*)sequencer)->reset_patterns();
   #endif
 
   #ifdef ENABLE_PARAMETERS
