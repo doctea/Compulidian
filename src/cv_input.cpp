@@ -15,9 +15,6 @@ extern WorkshopOutputWrapper output_wrapper;
 
 #ifdef ENABLE_CV_INPUT
 
-//#include "cv_input.h"
-
-#include "ParameterManager.h"
 #ifdef ENABLE_SCREEN
     #include "colours.h"
     #include "submenuitem.h"
