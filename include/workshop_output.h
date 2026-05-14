@@ -9,6 +9,11 @@
 #include "Drums.h"
 
 #include <SimplyAtomic.h>
+
+#ifdef USE_TINYUSB
+    extern Adafruit_USBD_MIDI usb_midi;
+    extern midi::MidiInterface<midi::SerialMIDI<Adafruit_USBD_MIDI>> USBMIDI;
+#endif
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
   //uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 

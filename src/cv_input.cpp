@@ -9,7 +9,7 @@
 
 #include "workshop_output.h"
 
-ParameterManager *parameter_manager = new ParameterManager(LOOP_LENGTH_TICKS);
+ParameterManager *parameter_manager = new ParameterManager();
 
 extern WorkshopOutputWrapper output_wrapper;
 
@@ -172,21 +172,22 @@ void setup_parameter_inputs() {
         if (shuffle_amount_parameter==nullptr) {
             Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
         } else {
-            shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, BIPOLAR);
+            shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
             parameter_index++;
         }
     #endif
 
-    FloatParameter *euclidian_density = sequencer->getParameterByName("Global density 0");  // untested..
+    FloatParameter *euclidian_density = sequencer->getParameterByName("Global density 0");
     //euclidian_density->debug = true;
-    euclidian_density->set_slot_x_all(0, vpi_knob_main, 1.0f, UNIPOLAR);
-    euclidian_density->set_slot_x_all(1, vpi_cv_1, 1.0f, BIPOLAR);
+    ((EuclidianSequencer*)sequencer)->set_density(0, 0.0f);     // set base density value to 0 so that main knob gives us full range and cv gives us modulation around that
+    euclidian_density->set_slot_x_all(0, vpi_knob_main, 1.0f, MOD_SLOT_UNI_RAW);
+    euclidian_density->set_slot_x_all(1, vpi_cv_1, 1.0f, MOD_SLOT_BI_NATIVE);
 
-    //FloatParameter *euclidian_density_2 = sequencer->getParameters()->get(parameter_index++);
-    FloatParameter *euclidian_density_2 = sequencer->getParameterByName("Global density 1");    // untested
+    FloatParameter *euclidian_density_2 = sequencer->getParameterByName("Global density 1");
     //euclidian_density_2->debug = true;
-    euclidian_density_2->set_slot_x_all(0, vpi_knob_x, 1.0f, UNIPOLAR);
-    euclidian_density_2->set_slot_x_all(1, vpi_cv_2, 1.0f, BIPOLAR);
+    ((EuclidianSequencer*)sequencer)->set_density(1, 0.0f);
+    euclidian_density_2->set_slot_x_all(0, vpi_knob_x, 1.0f, MOD_SLOT_UNI_RAW);
+    euclidian_density_2->set_slot_x_all(1, vpi_cv_2, 1.0f, MOD_SLOT_BI_NATIVE);
 
     /*
     FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);

@@ -88,6 +88,9 @@ void global_on_restart() {
   }
 #endif
 
+void setup_usb();
+void setup_midi();
+
 void setup() {
 
   set_sys_clock_khz(150000, true);
@@ -137,6 +140,10 @@ void setup() {
       if (Serial) { Serial.println(F("setting up cv input..")); Serial.flush(); }
       setup_cv_input();
       if (Serial) { Serial.println(F("..done setup_cv_input")); Serial.flush(); }
+
+      // Must call getParameters() before setup_parameter_inputs(), so that
+      // getParameterByName() calls inside setup_parameter_inputs() can find them.
+      sequencer->getParameters();
       
       if (Serial) { Serial.println(F("setting up parameter inputs..")); Serial.flush(); }
       setup_parameter_inputs();
@@ -204,10 +211,15 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
 
 void __not_in_flash_func(loop)() {
 
+  // todo: will need this if/when we convert the WorkshopOutputWrapper to use the ring buffer that Microlidian now uses
+  //output_wrapper->drain();
+
   ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
       ticked = update_clock_ticks();
   }
+
+  sequencer->on_loop(ticks);
 
   ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
