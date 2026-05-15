@@ -107,6 +107,13 @@ void ComputerCard::Abort()
 	runADCMode = RUN_ADC_MODE_REQUEST_ADC_STOP;
 }
 
+void __not_in_flash_func(ComputerCard::CorrectADCDNL)(uint16_t &value) const
+{
+	uint16_t adc512 = value + 512;
+	value += ((value & 0x3FF) == 0x1FF) << 2;
+	value += (adc512 >> 10) << 3;
+	value = uint32_t(value * 520349) >> 19; // Multiply by factor that maps 0-4095 input into 0-4095 output
+}
 	  
 
 // Per-audio-sample ISR, called when two sets of ADC samples have been collected from all four inputs
@@ -152,25 +159,24 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	// Set CV inputs, with ~240Hz LPF on CV input
 	int cvi = mux_state % 2;
 
-	// Attempted compensation of ADC DNL errors. Not really tested.
-	#ifdef COMPENSATE_ADC_DNL
-		uint16_t adc512=ADC_Buffer[cpuPhase][3]+512;
-		if (!(adc512 % 0x01FF)) ADC_Buffer[cpuPhase][3] += 4;
-		ADC_Buffer[cpuPhase][3] += (adc512>>10) << 3;
-	#endif
+	// Compensation of ADC DNL errors.
+	CorrectADCDNL(ADC_Buffer[cpuPhase][7]); // CV inputs
+	CorrectADCDNL(ADC_Buffer[cpuPhase][0]); // Audio inputs
+	CorrectADCDNL(ADC_Buffer[cpuPhase][4]);
+	CorrectADCDNL(ADC_Buffer[cpuPhase][1]);
+	CorrectADCDNL(ADC_Buffer[cpuPhase][5]);
 	
-	#ifdef COMPENSATE_ADC_LPF_CV
-		cvsm[cvi] = (15 * (cvsm[cvi]) + 16 * ADC_Buffer[cpuPhase][3]) >> 4;
-		cv[cvi] = 2048 - (cvsm[cvi] >> 4);
-	#else
-		cv[cvi] = 2048 - ADC_Buffer[cpuPhase][3];
-	#endif
+	cvsm[cvi] = (15 * (cvsm[cvi]) + 16 * ADC_Buffer[cpuPhase][7]) >> 4;
+	cv[cvi] = 2048 - (cvsm[cvi] >> 4);
 
 	// Set audio inputs, by averaging the two samples collected.
 	// Invert to counteract inverting op-amp input configuration
 	adcInR = -(((ADC_Buffer[cpuPhase][0] + ADC_Buffer[cpuPhase][4]) - 0x1000) >> 1);
-
 	adcInL = -(((ADC_Buffer[cpuPhase][1] + ADC_Buffer[cpuPhase][5]) - 0x1000) >> 1);
+
+	// 12kHz notch filters
+	adcInR = notchRight(adcInR);
+	adcInL = notchLeft(adcInL);
 
 	// Set pulse inputs
 	last_pulse[0] = pulse[0];

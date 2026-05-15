@@ -62,6 +62,32 @@ public:
 	void EnableNormalisationProbe() {useNormProbe = true;}
 
 protected:
+
+	class NotchFilter
+	{
+	public:
+		NotchFilter()
+		{
+			mix1 = mix2 = mixf1 = mixf2 = 0;
+		}
+		int32_t operator()(int32_t val)
+		{
+			int32_t mixf = (ooa0 * (val + mix2) - a2oa0 * mixf2) >> 14;
+			mix2 = mix1;
+			mix1 = val;
+			mixf2 = mixf1;
+			mixf1 = mixf;
+			return mixf;
+		}
+	private:
+		// 12kHz notch filter, to remove interference from mux lines
+		int32_t mix1, mix2, mixf1, mixf2;
+		static constexpr int32_t ooa0 = 16302, a2oa0 = 16221; // Q = 100, very narrow notch
+		
+	};
+
+	NotchFilter notchLeft, notchRight;
+
 	/// Callback, called once per sample at 48kHz
 	virtual void ProcessSample() = 0;
 
@@ -314,6 +340,8 @@ private:
 		return (dacChannel | 0x3000) | (((uint16_t)((value & 0x0FFF) + 0x800)) & 0x0FFF);
 	}
 	uint32_t next_norm_probe();
+
+    void CorrectADCDNL(uint16_t &value) const;
 
 	void BufferFull();
 
