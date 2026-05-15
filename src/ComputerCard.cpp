@@ -185,22 +185,22 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	pulse[1] = !gpio_get(PULSE_2_INPUT);
 
 	#ifdef ENABLE_CLOCK_INPUT_CV
-		if (last_pulse[1] != pulse[1] && pulse[1] && !cv_clock_reset) {
-			Serial.println("Pulse 2 rising edge");
+		if (last_pulse[1] != pulse[1] && pulse[1]) {
+			Serial.printf("Pulse 2 (RESET) rising edge during tick %u\n", ticks);
 			cv_clock_reset = true;
 			if (clock_mode!=CLOCK_EXTERNAL_CV) {
 				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
 				change_clock_mode(CLOCK_EXTERNAL_CV);
 			}
-		} else if (last_pulse[0] != pulse[0] && pulse[0]) {
+		} else if (last_pulse[0] != pulse[0] && !pulse[0]) {
 			// Serial.println("Pulse 1 rising edge");
+			Serial.printf("Pulse 1 (clock) rising edge during tick %u\n", ticks);
 			cv_clock_ticked = true;
 			if (clock_mode!=CLOCK_EXTERNAL_CV) {
 				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
 				change_clock_mode(CLOCK_EXTERNAL_CV);
 			}
 		}
-
 	#endif
 
 	// Set knobs, with ~60Hz LPF

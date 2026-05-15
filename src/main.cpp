@@ -90,6 +90,7 @@ void global_on_restart() {
 
 #ifdef ENABLE_CLOCK_INPUT_CV
   extern volatile bool cv_clock_ticked;
+  extern volatile bool cv_clock_reset;
   bool check_cv_clock_ticked() {
     bool was_ticked = cv_clock_ticked;
     cv_clock_ticked = false;
