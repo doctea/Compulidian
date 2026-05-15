@@ -103,7 +103,7 @@ public:
     virtual void __not_in_flash_func(ProcessSample)()
 	{       
 		AudioOut1(buffer[read_buffer_id][bufferIndex]);
-		AudioOut2(buffer[read_buffer_id][bufferIndex]);
+		// AudioOut2(buffer[read_buffer_id][bufferIndex]);
 
         bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
         if (bufferIndex == 0) {

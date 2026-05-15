@@ -16,8 +16,9 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 ## Basic features
 
 - Multiple independent Euclidean tracks for kick, snare, hi-hat, etc etc (actually ~16 tracks internally).
-- Plays audio samples out of both audio outputs (currently an 808 kit).
+- Plays audio samples out of Audio Out 1 (currently an 808 kit).
 - Currently 4 gate outputs (via Computer's 2x pulse and 2x cv outputs) are fed from kick, snare and 2x hi-hat tracks
+- Outputs a clock gate (16th notes) on Audio Out 2.
 - Defaults to a four-on-the-floor style pattern
 - Tracks are split into two groups, each group has its own 'global density' parameter controlled by Main knob and X knob, and modulated via CV1 and CV2.  Go from none to a very hectic number of pulses.
 - Last bar of every 4-bar phrase plays a variation fill.
