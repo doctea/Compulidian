@@ -19,9 +19,9 @@
 
 #ifdef ENABLE_CV_INPUT
     #include "cv_input.h"
-    #ifdef ENABLE_CLOCK_INPUT_CV
-        #include "cv_input_clock.h"
-    #endif
+    // #ifdef ENABLE_CLOCK_INPUT_CV
+    //     #include "cv_input_clock.h"
+    // #endif
 #endif
 
 #ifdef ENABLE_SHUFFLE
@@ -85,6 +85,15 @@ void global_on_restart() {
 #ifdef ENABLE_SHUFFLE
   void shuffled_step_callback(uint32_t step) {
     sequencer->on_step_shuffled(0, step);
+  }
+#endif
+
+#ifdef ENABLE_CLOCK_INPUT_CV
+  extern volatile bool cv_clock_ticked;
+  bool check_cv_clock_ticked() {
+    bool was_ticked = cv_clock_ticked;
+    cv_clock_ticked = false;
+    return was_ticked;
   }
 #endif
 
@@ -180,6 +189,10 @@ void setup() {
     add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
   #endif
         
+  #ifdef ENABLE_CLOCK_INPUT_CV
+    set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
+  #endif
+
   if (Serial) { Serial.println(F("setup() done - starting!")); }
 
 }

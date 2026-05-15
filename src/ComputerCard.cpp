@@ -1,5 +1,11 @@
 #include "ComputerCard.h"
 
+#ifdef ENABLE_CLOCK_INPUT_CV
+	extern volatile bool cv_clock_ticked;
+	extern volatile bool cv_clock_reset;
+	#include "clock.h"
+#endif
+
 ComputerCard *ComputerCard::thisptr;
 
 // Return pseudo-random bit for normalisation probe
@@ -115,6 +121,16 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	static int32_t cvsm[2] = { 0, 0 };
 	__attribute__((unused)) static int np = 0, np1 = 0, np2 = 0;
 
+    if (!adc_fifo_is_empty())
+    {
+        adc_run(false);
+        adc_fifo_drain();
+        adc_select_input(0);
+        adc_set_round_robin(0);
+        adc_set_round_robin(0b0001111U);
+        adc_run(true);
+    }
+
 	adc_select_input(0);
 
 	// Advance external mux to next state
@@ -161,6 +177,25 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	last_pulse[1] = pulse[1];
 	pulse[0] = !gpio_get(PULSE_1_INPUT);
 	pulse[1] = !gpio_get(PULSE_2_INPUT);
+
+	#ifdef ENABLE_CLOCK_INPUT_CV
+		if (last_pulse[0] != pulse[0] && pulse[0]) {
+			// Serial.println("Pulse 1 rising edge");
+			cv_clock_ticked = true;
+			if (clock_mode!=CLOCK_EXTERNAL_CV) {
+				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
+				change_clock_mode(CLOCK_EXTERNAL_CV);
+			}
+		}
+		if (last_pulse[1] != pulse[1] && pulse[1]) {
+			// Serial.println("Pulse 2 rising edge");
+			cv_clock_reset = true;
+			if (clock_mode!=CLOCK_EXTERNAL_CV) {
+				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
+				change_clock_mode(CLOCK_EXTERNAL_CV);
+			}
+		}
+	#endif
 
 	// Set knobs, with ~60Hz LPF
 	int knob = mux_state;
