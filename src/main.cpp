@@ -232,6 +232,14 @@ void __not_in_flash_func(loop)() {
       ticked = update_clock_ticks();
   }
 
+  if (ticked) {
+    if (is_bpm_on_sixteenth(ticks)) {
+      sw.AudioOut2(32767);
+    } else if (is_bpm_on_thirtysecond(ticks)) {
+      sw.AudioOut2(0);
+    }
+  }
+
   sequencer->on_loop(ticks);
 
   ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
