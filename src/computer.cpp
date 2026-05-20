@@ -109,80 +109,80 @@ void CalcCalCoeffs(int channel)
 	debug("%d %f %f\n", channel, calCoeffs[channel].m, calCoeffs[channel].b);
 }
 
-int ReadEEPROM()
-{
-	calibrationTable[0][0].voltage = -20;
-	calibrationTable[0][0].dacSetting = 347700;
-	calibrationTable[0][1].voltage = 0;
-	calibrationTable[0][1].dacSetting = 261200;
-	calibrationTable[0][2].voltage = 20;
-	calibrationTable[0][2].dacSetting = 174400;
+// int ReadEEPROM()
+// {
+// 	calibrationTable[0][0].voltage = -20;
+// 	calibrationTable[0][0].dacSetting = 347700;
+// 	calibrationTable[0][1].voltage = 0;
+// 	calibrationTable[0][1].dacSetting = 261200;
+// 	calibrationTable[0][2].voltage = 20;
+// 	calibrationTable[0][2].dacSetting = 174400;
 
-	calibrationTable[1][0].voltage = -20;
-	calibrationTable[1][0].dacSetting = 347700;
-	calibrationTable[1][1].voltage = 0;
-	calibrationTable[1][1].dacSetting = 261200;
-	calibrationTable[1][2].voltage = 20;
-	calibrationTable[1][2].dacSetting = 174400;
+// 	calibrationTable[1][0].voltage = -20;
+// 	calibrationTable[1][0].dacSetting = 347700;
+// 	calibrationTable[1][1].voltage = 0;
+// 	calibrationTable[1][1].dacSetting = 261200;
+// 	calibrationTable[1][2].voltage = 20;
+// 	calibrationTable[1][2].dacSetting = 174400;
 
-	if (ReadIntFromEEPROM(EEPROM_ADDR_ID) != EEPROM_VAL_ID)
-	{
-		debugp("Failed to read EEPROM ID\n");
-		return 1;
-	}
-	uint8_t buf[EEPROM_NUM_BYTES];
-	for (int i = 0; i < EEPROM_NUM_BYTES; i++)
-	{
-		buf[i] = ReadByteFromEEPROM(i);
-	}
+// 	if (ReadIntFromEEPROM(EEPROM_ADDR_ID) != EEPROM_VAL_ID)
+// 	{
+// 		debugp("Failed to read EEPROM ID\n");
+// 		return 1;
+// 	}
+// 	uint8_t buf[EEPROM_NUM_BYTES];
+// 	for (int i = 0; i < EEPROM_NUM_BYTES; i++)
+// 	{
+// 		buf[i] = ReadByteFromEEPROM(i);
+// 	}
 
-	int eepMajor = (buf[EEPROM_ADDR_VERSION] >> 4) & 0x0F;
-	int eepMinor = (buf[EEPROM_ADDR_VERSION] >> 2) & 0x03;
-	int eepPoint = buf[EEPROM_ADDR_VERSION] & 0x03;
-	debug("EEPROM version %d.%d.%d\n", eepMajor, eepMinor, eepPoint);
+// 	int eepMajor = (buf[EEPROM_ADDR_VERSION] >> 4) & 0x0F;
+// 	int eepMinor = (buf[EEPROM_ADDR_VERSION] >> 2) & 0x03;
+// 	int eepPoint = buf[EEPROM_ADDR_VERSION] & 0x03;
+// 	debug("EEPROM version %d.%d.%d\n", eepMajor, eepMinor, eepPoint);
 
-	uint16_t calculatedCRC = CRCencode(buf, 86);
-	uint16_t foundCRC = ((uint16_t)buf[EEPROM_ADDR_CRC_H] << 8) | buf[EEPROM_ADDR_CRC_L];
+// 	uint16_t calculatedCRC = CRCencode(buf, 86);
+// 	uint16_t foundCRC = ((uint16_t)buf[EEPROM_ADDR_CRC_H] << 8) | buf[EEPROM_ADDR_CRC_L];
 
-	if (calculatedCRC != foundCRC)
-	{
-		debugp("EEPROM CRC check failed\n");
-		return 1;
-	}
+// 	if (calculatedCRC != foundCRC)
+// 	{
+// 		debugp("EEPROM CRC check failed\n");
+// 		return 1;
+// 	}
 
-	int bufferIndex = 4;
+// 	int bufferIndex = 4;
 
-	for (uint8_t channel = 0; channel < CAL_MAX_CHANNELS; channel++)
-	{
-		int channelOffset = bufferIndex + (41 * channel);
-		numCalibrationPoints[channel] = buf[channelOffset++];
-		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
-		{
-			int8_t targetVoltage = (int8_t)buf[channelOffset++];
-			uint32_t dacSetting = 0;
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 24;
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 16;
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 8;
-			dacSetting |= ((uint32_t)buf[channelOffset++]);
+// 	for (uint8_t channel = 0; channel < CAL_MAX_CHANNELS; channel++)
+// 	{
+// 		int channelOffset = bufferIndex + (41 * channel);
+// 		numCalibrationPoints[channel] = buf[channelOffset++];
+// 		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
+// 		{
+// 			int8_t targetVoltage = (int8_t)buf[channelOffset++];
+// 			uint32_t dacSetting = 0;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 24;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 16;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 8;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]);
 
-			calibrationTable[channel][point].voltage = targetVoltage;
-			calibrationTable[channel][point].dacSetting = dacSetting;
-		}
-		CalcCalCoeffs(channel);
-	}
-	for (uint8_t channel = 0; channel < CAL_MAX_CHANNELS; channel++)
-	{
-		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
-		{
-			debug("%d %d %d %d\n",
-			      channel,
-			      point,
-			      calibrationTable[channel][point].voltage,
-			      calibrationTable[channel][point].dacSetting);
-		}
-	}
-	return 0;
-}
+// 			calibrationTable[channel][point].voltage = targetVoltage;
+// 			calibrationTable[channel][point].dacSetting = dacSetting;
+// 		}
+// 		CalcCalCoeffs(channel);
+// 	}
+// 	for (uint8_t channel = 0; channel < CAL_MAX_CHANNELS; channel++)
+// 	{
+// 		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
+// 		{
+// 			debug("%d %d %d %d\n",
+// 			      channel,
+// 			      point,
+// 			      calibrationTable[channel][point].voltage,
+// 			      calibrationTable[channel][point].dacSetting);
+// 		}
+// 	}
+// 	return 0;
+// }
 
 void SetupComputerIO()
 {
