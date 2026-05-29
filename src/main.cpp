@@ -213,6 +213,8 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
 
   //output_wrapper->sendClock();
 
+  parameter_manager->tick_sh();
+
   #ifdef ENABLE_EUCLIDIAN
       if (sequencer->is_running()) sequencer->on_tick(ticks);
       if (is_bpm_on_sixteenth(ticks) && output_processor->is_enabled()) {
