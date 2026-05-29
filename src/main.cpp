@@ -166,7 +166,7 @@ void setup() {
 
   #if defined(ENABLE_PARAMETERS)
     //Serial.println("..calling sequencer.getParameters()..");
-    LinkedList<FloatParameter*> *params = sequencer->getParameters();
+    ParameterList *params = sequencer->getParameters();
     Debug_printf("after setting up sequencer parameters, free RAM is %u\n", freeRam());
   #endif
 
