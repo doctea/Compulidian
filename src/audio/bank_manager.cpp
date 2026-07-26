@@ -82,6 +82,7 @@ bool BankManager::switch_bank(int n) {
 
     if (ok) {
         active_bank_ = n;
+        if (Serial) Serial.printf("BankMgr: switched to bank %d\n", n);
 
         // Persist new bank choice to flash.
         Settings s = settings_load();
@@ -158,7 +159,13 @@ bool BankManager::load_flash_bank_(int slot) {
     if (slot < 1 || slot > MAX_FLASH_BANKS) return false;
 
     const BankHeader *hdr = reinterpret_cast<const BankHeader *>(flash_bank_xip_addr(slot));
-    if (hdr->magic != BANK_MAGIC || hdr->version != BANK_VERSION) return false;
+    if (Serial) Serial.printf("BankMgr: load slot %d @ 0x%08X magic=0x%08X ver=%u n=%u\n",
+        slot, flash_bank_xip_addr(slot), hdr->magic, hdr->version, hdr->num_samples);
+
+    if (hdr->magic != BANK_MAGIC || hdr->version != BANK_VERSION) {
+        if (Serial) Serial.printf("BankMgr: load FAILED - bad magic/version\n");
+        return false;
+    }
 
     uint32_t num = hdr->num_samples;
     if (num == 0 || num > MAX_SAMPLES_PER_BANK) return false;
@@ -202,20 +209,27 @@ void BankManager::detect_banks_() {
         // Guard: ensure the bank's XIP address is within the device's flash.
         if (addr >= XIP_BASE + FLASH_SIZE_BYTES) {
             bank_valid_[slot] = false;
+            if (Serial) Serial.printf("BankMgr: slot %d @ 0x%08X SKIP (beyond flash end 0x%08X)\n",
+                slot, addr, XIP_BASE + FLASH_SIZE_BYTES);
             continue;
         }
 
         const BankHeader *hdr = reinterpret_cast<const BankHeader *>(addr);
-        bank_valid_[slot] = (hdr->magic   == BANK_MAGIC &&
-                             hdr->version == BANK_VERSION &&
-                             hdr->num_samples > 0 &&
-                             hdr->num_samples <= MAX_SAMPLES_PER_BANK);
+        uint32_t got_magic   = hdr->magic;
+        uint32_t got_version = hdr->version;
+        uint32_t got_num     = hdr->num_samples;
+        bool ok = (got_magic == BANK_MAGIC && got_version == BANK_VERSION
+                   && got_num > 0 && got_num <= MAX_SAMPLES_PER_BANK);
+        bank_valid_[slot] = ok;
 
-#ifdef ENABLE_DEBUG_SERIAL
         if (Serial) {
-            Serial.printf("BankManager: slot %d @ 0x%08X -> %s\n",
-                slot, addr, bank_valid_[slot] ? "valid" : "empty");
+            if (ok) {
+                Serial.printf("BankMgr: slot %d @ 0x%08X  VALID  magic=0x%08X ver=%u n=%u name='%.*s'\n",
+                    slot, addr, got_magic, got_version, got_num, 31, hdr->bank_name);
+            } else {
+                Serial.printf("BankMgr: slot %d @ 0x%08X  empty  magic=0x%08X (want 0x%08X) ver=%u n=%u\n",
+                    slot, addr, got_magic, BANK_MAGIC, got_version, got_num);
+            }
         }
-#endif
     }
 }

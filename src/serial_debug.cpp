@@ -5,6 +5,11 @@
 
 #include "sequencer/Euclidian/Sequencer.h"
 
+#include "audio/bank_manager.h"
+#include "audio/flash_layout.h"
+#include "audio/bank_header.h"
+#include "settings.h"
+
 #ifdef USE_TINYUSB
 
   bool debug_enable_output_parameter_input = false;
@@ -119,6 +124,31 @@
             Serial.printf("COMMIT_INFO: %s\n", COMMIT_INFO);  
             Serial.printf("ENV_NAME: %s\n", ENV_NAME);
             Serial.printf("Built at " __TIME__ " on " __DATE__ "\n");
+        } else if (serial_input_buffer[0]=='b') {
+          // re-print bank detection status
+          Serial.printf("--- Bank status (active=%d, valid_count=%d) ---\n",
+              bankManager.active_bank(), bankManager.num_valid_banks());
+          Serial.printf("Flash: XIP_BASE=0x%08X  BANKS_OFFSET=0x%08X  BANK_SIZE=0x%08X  MAX=%d\n",
+              XIP_BASE, FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
+          for (int slot = 0; slot <= FLASH_MAX_BANKS; ++slot) {
+              if (slot == 0) {
+                  Serial.printf("  slot 0: compiled-in  valid=%s\n",
+                      bankManager.is_bank_valid(0) ? "yes" : "no");
+                  continue;
+              }
+              uint32_t addr = flash_bank_xip_addr(slot);
+              const BankHeader *hdr = reinterpret_cast<const BankHeader *>(addr);
+              bool ok = bankManager.is_bank_valid(slot);
+              Serial.printf("  slot %d @ 0x%08X: %s  magic=0x%08X ver=%u n=%u name='%.*s'\n",
+                  slot, addr,
+                  ok ? "VALID  " : "empty  ",
+                  hdr->magic, hdr->version, hdr->num_samples,
+                  31, hdr->bank_name);
+          }
+          Serial.printf("--- Settings: active_bank=%u ---\n",
+              (unsigned)settings_load().active_bank);
+        } else if (serial_input_buffer[0]=='?') {
+          Serial.println("Commands: b=bank status  l=list patterns  s=interpolation  c=calc mode  v=volume  V=version  I=input debug  d/D=param debug");
         }
         serial_input_buffer_index = 0;
       } else {

@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compulidian Manager</title>
+<style>
+  :root {
+    --bg:      #18181b;
+    --surface: #27272a;
+    --border:  #3f3f46;
+    --accent:  #f59e0b;
+    --text:    #f4f4f5;
+    --muted:   #a1a1aa;
+    --danger:  #ef4444;
+    --ok:      #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  h1 { padding: 1rem 1.5rem; font-size: 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: .75rem; }
+  h1 span.badge { font-size: .7rem; background: var(--accent); color: #000; padding: 2px 8px; border-radius: 99px; }
+  nav { display: flex; border-bottom: 1px solid var(--border); }
+  nav button { padding: .6rem 1.25rem; background: none; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; border-bottom: 2px solid transparent; transition: .15s; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav button:hover { color: var(--text); }
+  .tab { display: none; padding: 1.25rem 1.5rem; max-width: 900px; }
+  .tab.active { display: block; }
+  label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
+  select, input[type=number], input[type=text] { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .4rem .6rem; border-radius: 6px; font-size: .9rem; }
+  button.btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .45rem 1rem; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: .15s; }
+  button.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  button.btn.primary:hover:not(:disabled) { opacity: .85; }
+  button.btn.danger { border-color: var(--danger); color: var(--danger); }
+  button.btn:disabled { opacity: .4; cursor: not-allowed; }
+  .row { display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem; }
+  .col { display: flex; flex-direction: column; gap: .3rem; }
+  #dropzone { border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; margin-bottom: 1rem; }
+  #dropzone.over { border-color: var(--accent); color: var(--accent); }
+  #dropzone input { display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-bottom: 1rem; }
+  thead th { text-align: left; padding: .4rem .6rem; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 400; }
+  tbody td { padding: .4rem .6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: rgba(255,255,255,.03); }
+  .name-cell input { width: 100%; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 4px; border-radius: 4px; font-size: .85rem; }
+  .name-cell input:focus { border-color: var(--border); background: var(--surface); outline: none; }
+  #progress-bar-wrap { background: var(--surface); border-radius: 4px; height: 8px; margin-top: .5rem; display: none; }
+  #progress-bar { background: var(--accent); height: 100%; border-radius: 4px; width: 0; transition: width .1s; }
+  #status { font-size: .85rem; color: var(--muted); margin-top: .5rem; min-height: 1.2em; }
+  #status.ok   { color: var(--ok); }
+  #status.err  { color: var(--danger); }
+  .section-title { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 1.25rem 0 .6rem; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .75rem; }
+  .card h3 { font-size: .8rem; margin-bottom: .5rem; color: var(--muted); }
+  .midi-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: .4rem; }
+  .midi-status.on { background: var(--ok); }
+  #server-warning { background: #78350f; border: 1px solid #b45309; border-radius: 8px; padding: .75rem 1rem; margin: .75rem 1.5rem; font-size: .85rem; display: none; }
+  #server-warning strong { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Compulidian Manager <span class="badge">Workshop Computer</span></h1>
+
+<div id="server-warning">
+  <strong>⚠ Must be served over HTTP from localhost</strong> — open via
+  <code>http://localhost:PORT/compulidian_manager.html</code>, not as a <code>file://</code> URL.
+  WebUSB and Web MIDI require a secure context (HTTPS or localhost).
+  ES module imports will silently fail on <code>file://</code>.
+  Run <code>python3 -m http.server 8080</code> in the <code>tools/web/</code> folder, or use any local HTTP server.
+</div>
+  <button class="active" onclick="switchTab('upload', this)">Sample Banks</button>
+  <button onclick="switchTab('config', this)">Configuration</button>
+</nav>
+
+<!-- =====================================================================
+     TAB: SAMPLE BANKS
+     ===================================================================== -->
+<div id="tab-upload" class="tab active">
+
+  <div id="dropzone" onclick="document.getElementById('fileInput').click()"
+       ondragover="event.preventDefault();this.classList.add('over')"
+       ondragleave="this.classList.remove('over')"
+       ondrop="handleDrop(event)">
+    <input type="file" id="fileInput" multiple accept="audio/*" onchange="handleFileInput(this.files)">
+    <p>Drop WAV / MP3 / OGG / FLAC files here, or click to browse</p>
+    <p style="font-size:.8rem;margin-top:.4rem">Files are converted to 16-bit PCM mono in the browser</p>
+  </div>
+
+  <table id="sample-table">
+    <thead><tr>
+      <th>#</th>
+      <th>Name</th>
+      <th>MIDI Note</th>
+      <th>Volume</th>
+      <th>Duration</th>
+      <th>Size</th>
+      <th></th>
+    </tr></thead>
+    <tbody id="sample-list"></tbody>
+  </table>
+  <p id="no-samples" style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">No samples loaded yet.</p>
+
+  <div class="row">
+    <div class="col">
+      <label>Resample to</label>
+      <select id="target-rate">
+        <option value="">Keep original</option>
+        <option value="44100">44100 Hz</option>
+        <option value="22050" selected>22050 Hz</option>
+        <option value="24000">24000 Hz</option>
+      </select>
+    </div>
+    <div class="col">
+      <label>Flash size</label>
+      <select id="flash-size" onchange="updateSlotOptions()">
+        <option value="2">2 MB (standard Pico)</option>
+        <option value="16">16 MB (extended flash)</option>
+      </select>
+    </div>
+    <div class="col">
+      <label>Bank slot</label>
+      <select id="bank-slot"></select>
+    </div>
+    <div class="col">
+      <label>Bank name</label>
+      <input type="text" id="bank-name" value="My Kit" maxlength="31" style="width:140px">
+    </div>
+  </div>
+
+  <div class="row">
+    <button class="btn primary" onclick="flashToDevice()">⚡ Flash to Device</button>
+    <button class="btn" onclick="downloadUF2()">⬇ Download UF2</button>
+    <button class="btn" onclick="readFromDevice()">⬆ Read from Device</button>
+    <button class="btn danger" onclick="rebootToBootloader()">↺ Reboot to Flash Mode</button>
+  </div>
+
+  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+  <div id="status"></div>
+
+  <div class="section-title">Flash Memory Budget</div>
+  <div id="budget-bar-wrap" style="background:var(--surface);border-radius:4px;height:16px;position:relative;overflow:hidden">
+    <div id="budget-bar" style="background:var(--accent);height:100%;width:0;transition:.2s"></div>
+    <span id="budget-label" style="position:absolute;right:8px;top:0;line-height:16px;font-size:.75rem;color:#000"></span>
+  </div>
+
+</div><!-- /tab-upload -->
+
+<!-- =====================================================================
+     TAB: CONFIGURATION
+     ===================================================================== -->
+<div id="tab-config" class="tab">
+
+  <div class="row" style="margin-bottom:1.25rem">
+    <button class="btn primary" onclick="midiConnect()">
+      <span class="midi-status" id="midi-dot"></span> Connect via Web MIDI
+    </button>
+    <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
+  </div>
+
+  <div class="section-title">Active Sample Bank</div>
+  <div class="row">
+    <div class="col">
+      <label>Active bank</label>
+      <select id="cfg-active-bank">
+        <option value="0">0 — Compiled-in (808)</option>
+        <option value="1">1 — Flash bank 1</option>
+        <option value="2">2 — Flash bank 2</option>
+        <option value="3">3 — Flash bank 3</option>
+        <option value="4">4 — Flash bank 4</option>
+      </select>
+    </div>
+    <div class="col" style="justify-content:flex-end">
+      <span id="cfg-banks-available" style="font-size:.8rem;color:var(--muted)"></span>
+    </div>
+  </div>
+
+  <div class="section-title">Output Jack Configuration</div>
+  <div class="grid4" id="cfg-outputs">
+    <!-- filled by renderOutputs() -->
+  </div>
+
+  <div class="section-title">CV Input Roles</div>
+  <div class="grid2" id="cfg-cv-inputs">
+    <!-- filled by renderCVInputs() -->
+  </div>
+
+  <div class="section-title">Knob Roles</div>
+  <div class="grid4" id="cfg-knobs" style="grid-template-columns:repeat(3,1fr)">
+    <!-- filled by renderKnobs() -->
+  </div>
+
+  <div class="row" style="margin-top:1.25rem">
+    <button class="btn primary" onclick="saveConfig()">💾 Save to Device</button>
+    <button class="btn" onclick="readConfig()">↺ Read from Device</button>
+  </div>
+  <div id="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
+
+</div><!-- /tab-config -->
+
+<script type="module">
+// ============================================================================
+// Flash layout constants  (must match include/audio/flash_layout.h)
+// ============================================================================
+const XIP_BASE             = 0x10000000;
+const FLASH_FIRMWARE_SIZE  = 0x001F0000;  // 1.9375 MB — matches compiled firmware size
+const FLASH_SETTINGS_RESERVED = 0x00010000;
+const FLASH_BANKS_OFFSET   = FLASH_FIRMWARE_SIZE + FLASH_SETTINGS_RESERVED; // 0x00200000
+const FLASH_BANK_SIZE_2MB  = 0;           // no user banks on 2 MB board (firmware too large)
+const FLASH_BANK_SIZE_16MB = 0x00380000;  // 3.5 MB per bank, 4 banks = 14 MB
+
+function bankXipAddr(slot, flashMB) {
+  const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
+  return XIP_BASE + FLASH_BANKS_OFFSET + (slot - 1) * bankSize;
+}
+
+// ============================================================================
+// Bank header constants  (must match include/audio/bank_header.h)
+// ============================================================================
+const BANK_MAGIC        = 0x636D7064;
+const BANK_VERSION      = 1;
+const BANK_HEADER_SIZE  = 4096;
+const MAX_SAMPLES       = 64;
+const BANK_ENTRY_SIZE   = 40;
+
+// ============================================================================
+// UF2
+// ============================================================================
+const UF2_BLOCK_SIZE   = 512;
+const UF2_DATA_SIZE    = 256;
+const UF2_MAGIC_START0 = 0x0A324655;
+const UF2_MAGIC_START1 = 0x9E5D5157;
+const UF2_MAGIC_END    = 0x0AB16F30;
+const RP2040_FAMILY_ID = 0xE48BFF56;
+
+function makeUf2Block(addr, data, blockIdx, totalBlocks) {
+  const buf = new ArrayBuffer(UF2_BLOCK_SIZE);
+  const dv  = new DataView(buf);
+  dv.setUint32(0,  UF2_MAGIC_START0, true);
+  dv.setUint32(4,  UF2_MAGIC_START1, true);
+  dv.setUint32(8,  0x00002000,       true); // flags: familyID present
+  dv.setUint32(12, addr,             true);
+  dv.setUint32(16, UF2_DATA_SIZE,    true);
+  dv.setUint32(20, blockIdx,         true);
+  dv.setUint32(24, totalBlocks,      true);
+  dv.setUint32(28, RP2040_FAMILY_ID, true);
+  new Uint8Array(buf, 32, data.length).set(data);
+  dv.setUint32(508, UF2_MAGIC_END, true);
+  return new Uint8Array(buf);
+}
+
+function binaryToUf2(data, baseAddr) {
+  // Pad to page boundary
+  const padded = new Uint8Array(Math.ceil(data.length / UF2_DATA_SIZE) * UF2_DATA_SIZE);
+  padded.fill(0xff);
+  padded.set(data);
+  const total = padded.length / UF2_DATA_SIZE;
+  const out   = new Uint8Array(total * UF2_BLOCK_SIZE);
+  for (let i = 0; i < total; i++) {
+    const chunk = padded.slice(i * UF2_DATA_SIZE, (i + 1) * UF2_DATA_SIZE);
+    out.set(makeUf2Block(baseAddr + i * UF2_DATA_SIZE, chunk, i, total), i * UF2_BLOCK_SIZE);
+  }
+  return out;
+}
+
+// ============================================================================
+// Audio decoding + conversion
+// ============================================================================
+async function fileToInt16(file, targetRate) {
+  const arrayBuf = await file.arrayBuffer();
+  const audioCtx = new AudioContext();
+  let decoded;
+  try { decoded = await audioCtx.decodeAudioData(arrayBuf); }
+  finally { audioCtx.close(); }
+
+  // Mix to mono float32
+  const len  = decoded.length;
+  const mono = new Float32Array(len);
+  for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+    const ch_data = decoded.getChannelData(ch);
+    for (let i = 0; i < len; i++) mono[i] += ch_data[i] / decoded.numberOfChannels;
+  }
+
+  let samples = mono;
+  let rate    = decoded.sampleRate;
+
+  // Resample via OfflineAudioContext
+  if (targetRate && targetRate !== rate) {
+    const newLen = Math.ceil(len * targetRate / rate);
+    const offline = new OfflineAudioContext(1, newLen, targetRate);
+    const srcBuf  = offline.createBuffer(1, len, rate);
+    srcBuf.getChannelData(0).set(mono);
+    const src = offline.createBufferSource();
+    src.buffer = srcBuf;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    samples = rendered.getChannelData(0);
+    rate    = targetRate;
+  }
+
+  // Normalise to 95 % of peak
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) if (Math.abs(samples[i]) > peak) peak = Math.abs(samples[i]);
+  if (peak > 0) for (let i = 0; i < samples.length; i++) samples[i] *= 0.95 / peak;
+
+  // Convert to Int16
+  const int16 = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++)
+    int16[i] = Math.max(-32768, Math.min(32767, Math.round(samples[i] * 32767)));
+
+  return { data: int16, rate };
+}
+
+// ============================================================================
+// Bank binary builder
+// ============================================================================
+function buildBankBinary(bankName, entries) {
+  // entries: [{ name, midiNote, volume, rate, int16Data }]
+  const header = new ArrayBuffer(BANK_HEADER_SIZE);
+  const hv = new DataView(header);
+  const enc = new TextEncoder();
+
+  hv.setUint32(0, BANK_MAGIC,          true);
+  hv.setUint32(4, BANK_VERSION,        true);
+  hv.setUint32(8, entries.length,      true);
+  // reserved[4] at 12 = 0
+  const nameBytes = enc.encode(bankName.substring(0, 31));
+  new Uint8Array(header, 16, 32).set(nameBytes);
+
+  let byteOffset = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const e  = entries[i];
+    const eo = 48 + i * BANK_ENTRY_SIZE;
+    hv.setUint32(eo,      byteOffset,        true);
+    hv.setUint32(eo + 4,  e.int16Data.length, true);
+    hv.setUint32(eo + 8,  e.rate,            true);
+    hv.setUint8 (eo + 12, 16);               // bit_depth
+    hv.setUint8 (eo + 13, e.midiNote);
+    hv.setUint8 (eo + 14, e.volume);
+    hv.setUint8 (eo + 15, 0);               // flags
+    const nb = enc.encode(e.name.substring(0, 23));
+    new Uint8Array(header, eo + 16, 24).set(nb);
+    byteOffset += e.int16Data.byteLength;
+  }
+
+  // Concatenate header + PCM
+  const result = new Uint8Array(BANK_HEADER_SIZE + byteOffset);
+  result.set(new Uint8Array(header), 0);
+  let off = BANK_HEADER_SIZE;
+  for (const e of entries) {
+    result.set(new Uint8Array(e.int16Data.buffer), off);
+    off += e.int16Data.byteLength;
+  }
+  return result;
+}
+
+// ============================================================================
+// Sample list state
+// ============================================================================
+let samples = [];  // [{ file, name, midiNote, volume, int16Data, rate }]
+
+function updateSampleTable() {
+  const tbody = document.getElementById('sample-list');
+  const noMsg = document.getElementById('no-samples');
+  tbody.innerHTML = '';
+  noMsg.style.display = samples.length ? 'none' : 'block';
+
+  for (let i = 0; i < samples.length; i++) {
+    const s   = samples[i];
+    const dur = s.int16Data ? (s.int16Data.length / s.rate).toFixed(2) + 's' : '…';
+    const kb  = s.int16Data ? (s.int16Data.byteLength / 1024).toFixed(1) + ' KB' : '…';
+    const tr  = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td class="name-cell"><input value="${s.name}" onchange="samples[${i}].name=this.value"></td>
+      <td><input type="number" min="0" max="127" value="${s.midiNote}" style="width:56px"
+           onchange="samples[${i}].midiNote=parseInt(this.value)"></td>
+      <td><input type="number" min="0" max="127" value="${s.volume}" style="width:56px"
+           onchange="samples[${i}].volume=parseInt(this.value)"></td>
+      <td>${dur}</td>
+      <td>${kb}</td>
+      <td><button class="btn" style="padding:.2rem .6rem" onclick="removeSample(${i})">✕</button></td>`;
+    tbody.appendChild(tr);
+  }
+  updateBudget();
+}
+
+function removeSample(i) { samples.splice(i, 1); updateSampleTable(); }
+
+function updateBudget() {
+  const flashMB  = parseInt(document.getElementById('flash-size').value);
+  const slot     = parseInt(document.getElementById('bank-slot').value);
+  const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
+  const used     = BANK_HEADER_SIZE + samples.reduce((s, e) => s + (e.int16Data ? e.int16Data.byteLength : 0), 0);
+  const pct      = Math.min(100, (used / bankSize) * 100);
+  document.getElementById('budget-bar').style.width = pct + '%';
+  document.getElementById('budget-label').textContent =
+    `${(used / 1024).toFixed(0)} KB / ${(bankSize / 1024).toFixed(0)} KB`;
+  const bar = document.getElementById('budget-bar');
+  bar.style.background = pct > 90 ? 'var(--danger)' : pct > 70 ? '#f59e0b' : 'var(--ok)';
+  document.getElementById('budget-bar-wrap').style.display = 'block';
+}
+
+// ============================================================================
+// File handling
+// ============================================================================
+function handleDrop(ev) {
+  ev.preventDefault();
+  document.getElementById('dropzone').classList.remove('over');
+  handleFileInput(ev.dataTransfer.files);
+}
+
+async function handleFileInput(fileList) {
+  const targetRate = parseInt(document.getElementById('target-rate').value) || null;
+  for (const f of fileList) {
+    setStatus(`Loading ${f.name}…`);
+    try {
+      const { data, rate } = await fileToInt16(f, targetRate);
+      const name = f.name.replace(/\.[^.]+$/, '').substring(0, 23);
+      const midiNote = 36 + samples.length; // auto-assign sequentially
+      samples.push({ file: f, name, midiNote, volume: 127, int16Data: data, rate });
+    } catch(e) {
+      setStatus(`Error loading ${f.name}: ${e.message}`, true);
+    }
+  }
+  setStatus('');
+  updateSampleTable();
+}
+window.handleDrop = handleDrop;
+window.handleFileInput = handleFileInput;
+window.removeSample = removeSample;
+
+// ============================================================================
+// Flash slot options
+// ============================================================================
+function updateSlotOptions() {
+  const flashMB = parseInt(document.getElementById('flash-size').value);
+  const maxSlots = flashMB <= 2 ? 1 : 4;
+  const sel = document.getElementById('bank-slot');
+  sel.innerHTML = '';
+  for (let i = 1; i <= maxSlots; i++) {
+    const opt = document.createElement('option');
+    opt.value = i; opt.textContent = `Slot ${i}`;
+    sel.appendChild(opt);
+  }
+  updateBudget();
+}
+window.updateSlotOptions = updateSlotOptions;
+updateSlotOptions();
+
+// ============================================================================
+// Picoboot flash operations
+// ============================================================================
+import { Picoboot } from './lib/picoflash/index.js';
+
+async function getReadyBinary() {
+  if (samples.length === 0) { setStatus('No samples loaded.', true); return null; }
+  setStatus('Building bank binary…');
+  try {
+    return buildBankBinary(
+      document.getElementById('bank-name').value || 'My Kit',
+      samples
+    );
+  } catch(e) {
+    setStatus('Build failed: ' + e.message, true);
+    return null;
+  }
+}
+
+async function flashToDevice() {
+  const binary = await getReadyBinary();
+  if (!binary) return;
+  const flashMB = parseInt(document.getElementById('flash-size').value);
+  const slot    = parseInt(document.getElementById('bank-slot').value);
+  const addr    = bankXipAddr(slot, flashMB);
+
+  setStatus('Requesting picoboot device (put device in BOOTSEL mode first)…');
+  let pico;
+  try { pico = await Picoboot.requestDevice(); }
+  catch(e) { setStatus('Device not found: ' + e.message, true); return; }
+
+  showProgress(0);
+  try {
+    await pico.flashEraseAndWrite(addr, binary, (pct) => showProgress(pct));
+    await pico.reboot(200);
+    setStatus(`✓ Bank ${slot} flashed successfully (${(binary.length/1024).toFixed(1)} KB). Device rebooting…`, false, true);
+  } catch(e) {
+    setStatus('Flash failed: ' + e.message, true);
+  } finally {
+    hideProgress();
+  }
+}
+window.flashToDevice = flashToDevice;
+
+async function downloadUF2() {
+  const binary = await getReadyBinary();
+  if (!binary) return;
+  const flashMB = parseInt(document.getElementById('flash-size').value);
+  const slot    = parseInt(document.getElementById('bank-slot').value);
+  const addr    = bankXipAddr(slot, flashMB);
+
+  const uf2 = binaryToUf2(binary, addr);
+  const name = `compulidian-bank${slot}.uf2`;
+  const blob = new Blob([uf2], { type: 'application/octet-stream' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`✓ Downloaded ${name}`, false, true);
+}
+window.downloadUF2 = downloadUF2;
+
+async function readFromDevice() {
+  const flashMB = parseInt(document.getElementById('flash-size').value);
+  const slot    = parseInt(document.getElementById('bank-slot').value);
+  const addr    = bankXipAddr(slot, flashMB);
+
+  setStatus('Requesting picoboot device…');
+  let pico;
+  try { pico = await Picoboot.requestDevice(); }
+  catch(e) { setStatus('Device not found: ' + e.message, true); return; }
+
+  setStatus(`Reading bank header from slot ${slot}…`);
+  try {
+    const rawHeader = await pico.flashRead(addr, BANK_HEADER_SIZE);
+    const dv = new DataView(rawHeader.buffer);
+    const magic = dv.getUint32(0, true);
+    if (magic !== BANK_MAGIC) {
+      setStatus(`Slot ${slot} is empty (no valid bank header).`); return;
+    }
+    const numSamples = dv.getUint32(8, true);
+    const bankName   = readCString(rawHeader, 16, 32);
+    setStatus(`Found bank "${bankName}" with ${numSamples} samples in slot ${slot}.`, false, true);
+    document.getElementById('bank-name').value = bankName;
+  } catch(e) {
+    setStatus('Read failed: ' + e.message, true);
+  }
+}
+window.readFromDevice = readFromDevice;
+
+async function rebootToBootloader() {
+  // Try via SysEx first (device stays running), fall back to manual instruction.
+  if (midiOutput) {
+    const msg = [0xF0, 0x7D, 0x43, 0x20, 0xF7];
+    midiOutput.send(msg);
+    setStatus('Reboot command sent. Wait ~2s then connect via picoboot.');
+  } else {
+    setStatus('Not connected via MIDI. Hold BOOTSEL and press RESET on the Pico, then use Flash to Device.');
+  }
+}
+window.rebootToBootloader = rebootToBootloader;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+function readCString(uint8, offset, maxLen) {
+  let s = '';
+  for (let i = 0; i < maxLen; i++) {
+    const c = uint8[offset + i];
+    if (!c) break;
+    s += String.fromCharCode(c);
+  }
+  return s;
+}
+
+function setStatus(msg, isError = false, isOk = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className   = isError ? 'err' : isOk ? 'ok' : '';
+}
+
+function showProgress(pct) {
+  document.getElementById('progress-bar-wrap').style.display = 'block';
+  document.getElementById('progress-bar').style.width = (pct * 100).toFixed(0) + '%';
+}
+function hideProgress() {
+  document.getElementById('progress-bar-wrap').style.display = 'none';
+}
+
+// ============================================================================
+// Tab switching
+// ============================================================================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+window.switchTab = switchTab;
+
+// ============================================================================
+// Config tab — Web MIDI
+// ============================================================================
+const SYSEX_MFR_ID    = 0x7D;
+const SYSEX_DEVICE_ID = 0x43;
+const SYSEX_CMD_GET   = 0x10;
+const SYSEX_CMD_DATA  = 0x11;
+
+const OUTPUT_TYPES   = ['Audio', 'Clock', 'Gate', 'CV'];
+const INPUT_ROLES    = ['None', 'BPM', 'Density', 'Pitch', 'Bank'];
+const OUTPUT_LABELS  = ['Pulse 1', 'Pulse 2', 'CV 1', 'CV 2'];
+const CV_LABELS      = ['CV 1', 'CV 2'];
+const KNOB_LABELS    = ['Main', 'X', 'Y'];
+
+let midiAccess  = null;
+let midiOutput  = null;
+let midiInput   = null;
+let currentCfg  = null;  // raw data array from last SYSEX_CMD_DATA
+
+function midiDot(on) {
+  document.getElementById('midi-dot').className = 'midi-status' + (on ? ' on' : '');
+}
+
+async function midiConnect() {
+  if (!navigator.requestMIDIAccess) {
+    document.getElementById('config-status').textContent = 'Web MIDI not supported in this browser.';
+    return;
+  }
+  try {
+    midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+  } catch(e) {
+    document.getElementById('config-status').textContent = 'MIDI access denied: ' + e.message;
+    return;
+  }
+
+  // Find Compulidian input and output
+  midiOutput = null; midiInput = null;
+  for (const out of midiAccess.outputs.values()) {
+    if (out.name.toLowerCase().includes('compulidian')) { midiOutput = out; break; }
+  }
+  for (const inp of midiAccess.inputs.values()) {
+    if (inp.name.toLowerCase().includes('compulidian')) {
+      midiInput = inp;
+      midiInput.onmidimessage = onMidiMessage;
+      break;
+    }
+  }
+
+  if (!midiOutput || !midiInput) {
+    const outs = Array.from(midiAccess.outputs.values()).map(o => `"${o.name}"`).join(', ');
+    const ins  = Array.from(midiAccess.inputs.values()).map(i  => `"${i.name}"`).join(', ');
+    document.getElementById('config-status').textContent =
+        `Compulidian not found. Available outputs: [${outs||'none'}]  inputs: [${ins||'none'}].`;
+    return;
+  }
+
+  if (midiOutput) {
+    midiDot(true);
+    document.getElementById('midi-device-name').textContent = midiOutput.name;
+    document.getElementById('config-status').textContent = 'Connected. Requesting config…';
+    readConfig();
+  } else {
+    document.getElementById('config-status').textContent = 'No MIDI device found. Is Compulidian connected?';
+  }
+}
+window.midiConnect = midiConnect;
+
+function onMidiMessage(ev) {
+  const data = ev.data;
+  if (data[0] !== 0xF0 || data[data.length - 1] !== 0xF7) return;
+  // Strip F0 and F7
+  const payload = data.slice(1, data.length - 1);
+  if (payload[0] !== SYSEX_MFR_ID || payload[1] !== SYSEX_DEVICE_ID) return;
+  if (payload[2] === SYSEX_CMD_DATA) {
+    currentCfg = payload.slice(3); // active_bank, num_valid_banks, ...
+    applyCfgToUI(currentCfg);
+    document.getElementById('config-status').textContent = '✓ Config loaded from device.';
+  }
+}
+
+function readConfig() {
+  if (!midiOutput) { document.getElementById('config-status').textContent = 'Not connected.'; return; }
+  midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_GET, 0xF7]);
+}
+window.readConfig = readConfig;
+
+function saveConfig() {
+  if (!midiOutput) { document.getElementById('config-status').textContent = 'Not connected.'; return; }
+  const d = buildCfgFromUI();
+  const msg = [0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_DATA, ...d, 0xF7];
+  midiOutput.send(msg);
+  document.getElementById('config-status').textContent = 'Config sent. Waiting for confirmation…';
+}
+window.saveConfig = saveConfig;
+
+// ============================================================================
+// Config UI rendering
+// ============================================================================
+function selectHtml(id, opts, val) {
+  const optsHtml = opts.map((o, i) => `<option value="${i}"${i===val?' selected':''}>${o}</option>`).join('');
+  return `<select id="${id}" style="width:100%">${optsHtml}</select>`;
+}
+
+function renderOutputs() {
+  const cont = document.getElementById('cfg-outputs');
+  cont.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <h3>${OUTPUT_LABELS[i]}</h3>
+      <label>Type</label>${selectHtml(`out-type-${i}`, OUTPUT_TYPES, 0)}
+      <label style="margin-top:.5rem">Channel / Voice</label>
+      <input type="number" id="out-ch-${i}" min="0" max="16" value="1" style="width:100%">`;
+    cont.appendChild(card);
+  }
+}
+
+function renderCVInputs() {
+  const cont = document.getElementById('cfg-cv-inputs');
+  cont.innerHTML = '';
+  for (let i = 0; i < 2; i++) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h3>${CV_LABELS[i]}</h3><label>Role</label>${selectHtml(`cv-role-${i}`, INPUT_ROLES, 0)}`;
+    cont.appendChild(card);
+  }
+}
+
+function renderKnobs() {
+  const cont = document.getElementById('cfg-knobs');
+  cont.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h3>${KNOB_LABELS[i]} Knob</h3><label>Role</label>${selectHtml(`knob-role-${i}`, INPUT_ROLES, 0)}`;
+    cont.appendChild(card);
+  }
+}
+
+function applyCfgToUI(d) {
+  // d = [active_bank, num_valid_banks, out0.type, out0.ch, out0.note, out1.type, ..., cv0, cv1, k0, k1, k2]
+  if (d.length < 19) return;
+  document.getElementById('cfg-active-bank').value = d[0];
+  document.getElementById('cfg-banks-available').textContent =
+    `${d[1]} bank(s) available`;
+  for (let i = 0; i < 4; i++) {
+    document.getElementById(`out-type-${i}`).value = d[2 + i * 3];
+    document.getElementById(`out-ch-${i}`).value   = d[2 + i * 3 + 1];
+  }
+  document.getElementById('cv-role-0').value   = d[14];
+  document.getElementById('cv-role-1').value   = d[15];
+  document.getElementById('knob-role-0').value = d[16];
+  document.getElementById('knob-role-1').value = d[17];
+  document.getElementById('knob-role-2').value = d[18];
+}
+
+function buildCfgFromUI() {
+  const d = new Array(19).fill(0);
+  d[0] = parseInt(document.getElementById('cfg-active-bank').value);
+  d[1] = 0; // num_valid_banks — read-only, device ignores it
+  for (let i = 0; i < 4; i++) {
+    d[2 + i * 3]     = parseInt(document.getElementById(`out-type-${i}`).value);
+    d[2 + i * 3 + 1] = parseInt(document.getElementById(`out-ch-${i}`).value);
+    d[2 + i * 3 + 2] = 0; // note (not editable in basic UI)
+  }
+  d[14] = parseInt(document.getElementById('cv-role-0').value);
+  d[15] = parseInt(document.getElementById('cv-role-1').value);
+  d[16] = parseInt(document.getElementById('knob-role-0').value);
+  d[17] = parseInt(document.getElementById('knob-role-1').value);
+  d[18] = parseInt(document.getElementById('knob-role-2').value);
+  return d;
+}
+
+// Initial render
+renderOutputs();
+renderCVInputs();
+renderKnobs();
+
+// Show warning when opened as file:// (ES modules and WebUSB/MIDI won't work)
+if (location.protocol === 'file:') {
+  const w = document.getElementById('server-warning');
+  w.style.display = 'block';
+  w.innerHTML += `<br><br><strong>Quick fix:</strong> open a terminal in the
+    <code>tools/web/</code> folder and run:<br>
+    <code>python3 -m http.server 8080</code><br>
+    then open <code>http://localhost:8080/compulidian_manager.html</code>`;
+}
+</script>
+</body>
+</html>

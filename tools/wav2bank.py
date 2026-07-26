@@ -53,13 +53,13 @@ from math import gcd
 # ---------------------------------------------------------------------------
 # Flash layout constants (must match include/audio/flash_layout.h)
 # ---------------------------------------------------------------------------
-XIP_BASE           = 0x10000000
-FLASH_FIRMWARE_SIZE  = 0x00100000   # 1 MB reserved for firmware
+XIP_BASE             = 0x10000000
+FLASH_FIRMWARE_SIZE  = 0x001F0000   # 1.9375 MB reserved for firmware
 FLASH_SETTINGS_SIZE  = 0x00010000   # 64 KB reserved for settings
-FLASH_BANKS_OFFSET   = FLASH_FIRMWARE_SIZE + FLASH_SETTINGS_SIZE  # 0x00110000
+FLASH_BANKS_OFFSET   = FLASH_FIRMWARE_SIZE + FLASH_SETTINGS_SIZE  # 0x00200000
 
-FLASH_BANK_SIZE_2MB  = None   # computed from remaining flash
-FLASH_BANK_SIZE_16MB = 0x00400000  # 4 MB per bank on extended cards
+FLASH_BANK_SIZE_2MB  = 0           # no user banks on 2 MB board (firmware uses ~1.73 MB)
+FLASH_BANK_SIZE_16MB = 0x00380000   # 3.5 MB per bank on 16 MB cards (4 banks = 14 MB)
 
 MAX_SAMPLES_PER_BANK = 64
 
@@ -231,10 +231,8 @@ def binary_to_uf2(data: bytes, base_addr: int) -> bytes:
 def bank_xip_address(slot: int, flash_size_mb: int) -> int:
     """Return the XIP (memory-mapped) address for bank slot n (1-indexed)."""
     if flash_size_mb <= 2:
-        bank_size = flash_size_mb * 1024 * 1024 - FLASH_BANKS_OFFSET
-    else:
-        bank_size = FLASH_BANK_SIZE_16MB
-    return XIP_BASE + FLASH_BANKS_OFFSET + (slot - 1) * bank_size
+        raise ValueError("2 MB boards do not support user sample banks (firmware uses ~1.73 MB). Use --flash-size 16.")
+    return XIP_BASE + FLASH_BANKS_OFFSET + (slot - 1) * FLASH_BANK_SIZE_16MB
 
 
 # ---------------------------------------------------------------------------

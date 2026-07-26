@@ -18,12 +18,12 @@
 // ---------------------------------------------------------------------------
 // Firmware reserve
 // ---------------------------------------------------------------------------
-// Firmware occupies the start of flash. Typical RP2040 Arduino builds are
-// 400-600 KB; 1 MB is a generous upper bound that should never be exceeded.
-// Sample banks are placed AFTER this reserve, so firmware reflashing never
-// overwrites bank data.
+// The compiled firmware (code + const 808 sample arrays) is currently ~1.73 MB.
+// Round up to 1.9375 MB with headroom for future growth.
+// Banks and settings are placed AFTER this reserve, so firmware reflashing
+// (UF2 drag-drop or picoboot) never touches bank data.
 
-#define FLASH_FIRMWARE_SIZE     0x00100000u   // 1 MB
+#define FLASH_FIRMWARE_SIZE     0x001F0000u   // 1.9375 MB
 
 // ---------------------------------------------------------------------------
 // Settings sector
@@ -38,20 +38,24 @@
 // ---------------------------------------------------------------------------
 // Sample bank region
 // ---------------------------------------------------------------------------
+// Banks start at exactly the 2 MB mark — a clean boundary that is safely
+// beyond the firmware end on both 2 MB and 16 MB boards.
 // Banks are numbered 1..FLASH_MAX_BANKS (bank 0 = compiled-in, not in flash).
 
-#define FLASH_BANKS_OFFSET  (FLASH_SETTINGS_OFFSET + FLASH_SETTINGS_RESERVED)  // 0x00110000
+#define FLASH_BANKS_OFFSET  (FLASH_SETTINGS_OFFSET + FLASH_SETTINGS_RESERVED)  // 0x00200000
 #define FLASH_BANKS_ADDR    (XIP_BASE + FLASH_BANKS_OFFSET)
 
 // Per-bank size and maximum bank count depend on total flash size.
 #if FLASH_SIZE_MB <= 2
-  // Standard 2 MB board: one flash bank using whatever space remains after
-  // the firmware reserve and settings block (~960 KB).
-  #define FLASH_BANK_SIZE   (FLASH_SIZE_BYTES - FLASH_BANKS_OFFSET)
-  #define FLASH_MAX_BANKS   1
+  // 2 MB board: the compiled-in 808 samples make the firmware ~1.73 MB,
+  // leaving no usable flash for user banks.  Banks are disabled; only the
+  // compiled-in bank 0 is available.
+  #define FLASH_BANK_SIZE   0u
+  #define FLASH_MAX_BANKS   0
 #else
-  // Extended 16 MB board: four 4 MB banks.
-  #define FLASH_BANK_SIZE   0x00400000u   // 4 MB per bank
+  // 16 MB board: 14 MB available from the 2 MB mark (16 - 2 = 14).
+  // 4 banks × 3.5 MB = 14 MB exactly.
+  #define FLASH_BANK_SIZE   0x00380000u   // 3.5 MB per bank
   #define FLASH_MAX_BANKS   4
 #endif
 
