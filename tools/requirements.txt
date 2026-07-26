@@ -1,0 +1,6 @@
+# Compulidian tools — Python dependencies
+# Install with: pip install -r requirements.txt
+
+numpy>=1.24
+scipy>=1.11
+soundfile>=0.12
