@@ -8,17 +8,37 @@
 #include "workshop_output.h"
 
 // ---------------------------------------------------------------------------
-// SysEx protocol  (matches tools/web/compulidian_manager.html)
-// F0 7D 43 <cmd> [data...] F7
+// SysEx protocol v2 (matches tools/web/compulidian_manager.html)
+// Frame:
+// F0 7D 43 <ver> <type> <req_id> <status> [payload...] F7
 // ---------------------------------------------------------------------------
 #define SYSEX_MFR_ID     0x7D
 #define SYSEX_DEVICE_ID  0x43   // 'C'
-#define SYSEX_CMD_GET    0x10   // host → device: request config
-#define SYSEX_CMD_DATA   0x11   // bidirectional: config payload (19 bytes)
-#define SYSEX_CMD_REBOOT 0x20   // host → device: reboot to bootloader
+#define SYSEX_PROTO_VER  0x02
 
-// Data layout for SYSEX_CMD_DATA (indices into the SysEx data array,
-// i.e. after the F0, MFR_ID, DEVICE_ID, CMD bytes have been consumed):
+#define SYSEX_TYPE_GET_CONFIG_REQ 0x10
+#define SYSEX_TYPE_SET_CONFIG_REQ 0x11
+#define SYSEX_TYPE_REBOOT_REQ     0x20
+
+#define SYSEX_TYPE_CONFIG_RESP    0x30
+#define SYSEX_TYPE_ACK            0x31
+#define SYSEX_TYPE_NACK           0x32
+
+#define SYSEX_STATUS_OK                    0x00
+#define SYSEX_NACK_BAD_LENGTH             0x01
+#define SYSEX_NACK_UNSUPPORTED_VERSION    0x02
+#define SYSEX_NACK_UNKNOWN_TYPE           0x03
+#define SYSEX_NACK_INVALID_VALUE          0x04
+#define SYSEX_NACK_NOT_READY              0x05
+
+#ifndef SYSEX_DEBUG
+#define SYSEX_DEBUG 0
+#endif
+
+#define SYSEX_FRAME_BYTES         6
+
+// Data layout for config payload (indices into the payload bytes after
+// [MFR, DEVICE, VER, TYPE, REQ_ID, STATUS]):
 //  [0]  active_bank
 //  [1]  num_valid_banks (read-only, sent by device, ignored on receive)
 //  [2..4]  outputs[0]: type, channel, note
@@ -39,31 +59,147 @@
 
 static Settings current_settings;
 
-static void send_config_sysex() {
-    if(Serial) Serial.printf("send_config_sysex() active_bank=%i\n", current_settings.active_bank);
-    // Header (3) + settings (19) + bank names (FLASH_MAX_BANKS × 32)
-    const int names_len = FLASH_MAX_BANKS * SYSEX_BANK_NAME;
-    uint8_t buf[3 + SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME];
+enum PendingSysexAction : uint8_t {
+    PENDING_NONE = 0,
+    PENDING_SEND_CONFIG = 1,
+    PENDING_SEND_ACK = 2,
+    PENDING_SEND_NACK = 3,
+    PENDING_REBOOT_BOOTSEL = 4,
+};
+
+struct PendingSysexItem {
+    uint8_t action;
+    uint8_t req_id;
+    uint8_t arg;
+};
+
+static volatile uint8_t pending_sysex_head = 0;
+static volatile uint8_t pending_sysex_tail = 0;
+static PendingSysexItem pending_sysex_queue[8];
+
+static void send_config_sysex(uint8_t req_id = 0);
+
+static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 0) {
+    noInterrupts();
+    const uint8_t next_head = (uint8_t)((pending_sysex_head + 1) % (sizeof(pending_sysex_queue) / sizeof(pending_sysex_queue[0])));
+    if (next_head == pending_sysex_tail) {
+        interrupts();
+        if (SYSEX_DEBUG && Serial) Serial.println("pending sysex queue full, dropping action");
+        return false;
+    }
+    pending_sysex_queue[pending_sysex_head].action = action;
+    pending_sysex_queue[pending_sysex_head].req_id = req_id;
+    pending_sysex_queue[pending_sysex_head].arg = arg;
+    pending_sysex_head = next_head;
+    interrupts();
+    return true;
+}
+
+static bool dequeue_pending_sysex(PendingSysexItem *out) {
+    if (!out) return false;
+    noInterrupts();
+    if (pending_sysex_tail == pending_sysex_head) {
+        interrupts();
+        return false;
+    }
+    *out = pending_sysex_queue[pending_sysex_tail];
+    pending_sysex_tail = (uint8_t)((pending_sysex_tail + 1) % (sizeof(pending_sysex_queue) / sizeof(pending_sysex_queue[0])));
+    interrupts();
+    return true;
+}
+
+static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const uint8_t *payload, uint16_t payload_len) {
+    // On first browser connect, MIDI can become usable slightly before mounted()
+    // stabilizes. Wait briefly, but do not hard-drop the frame if it still reads false.
+    if (!TinyUSBDevice.mounted()) {
+        const uint32_t start_ms = millis();
+        while (!TinyUSBDevice.mounted() && (millis() - start_ms) < 250) {
+            delay(1);
+        }
+        if (SYSEX_DEBUG && !TinyUSBDevice.mounted() && Serial) {
+            Serial.println("send_sysex_frame(): USB still reports unmounted, attempting send anyway");
+        }
+    }
+
+    uint8_t buf[SYSEX_FRAME_BYTES + SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME];
+    if (payload_len > sizeof(buf) - SYSEX_FRAME_BYTES) {
+        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): payload too large");
+        return false;
+    }
+
     memset(buf, 0, sizeof(buf));
     buf[0] = SYSEX_MFR_ID;
     buf[1] = SYSEX_DEVICE_ID;
-    buf[2] = SYSEX_CMD_DATA;
-    buf[3] = current_settings.active_bank;
-    buf[4] = (uint8_t)bankManager.num_valid_banks();
-    for (int i = 0; i < 4; i++) {
-        buf[5 + i * 3]     = (uint8_t)current_settings.outputs[i].type;
-        buf[5 + i * 3 + 1] = current_settings.outputs[i].channel;
-        buf[5 + i * 3 + 2] = current_settings.outputs[i].note;
+    buf[2] = SYSEX_PROTO_VER;
+    buf[3] = type;
+    buf[4] = req_id & 0x7F;
+    buf[5] = status & 0x7F;
+    if (payload && payload_len > 0) {
+        memcpy(buf + SYSEX_FRAME_BYTES, payload, payload_len);
     }
-    buf[17] = (uint8_t)current_settings.cv_input_role[0];
-    buf[18] = (uint8_t)current_settings.cv_input_role[1];
-    buf[19] = (uint8_t)current_settings.knob_role[0];
-    buf[20] = (uint8_t)current_settings.knob_role[1];
-    buf[21] = (uint8_t)current_settings.knob_role[2];
+
+    if (SYSEX_DEBUG && Serial) {
+        Serial.printf("sysex tx: type=0x%02X req=%u status=0x%02X payload=%u\n",
+            type, req_id, status, payload_len);
+    }
+    USBMIDI.sendSysEx(SYSEX_FRAME_BYTES + payload_len, buf, false);
+    return true;
+}
+
+static void send_ack(uint8_t req_id) {
+    send_sysex_frame(SYSEX_TYPE_ACK, req_id, SYSEX_STATUS_OK, nullptr, 0);
+}
+
+static void send_nack(uint8_t req_id, uint8_t reason) {
+    send_sysex_frame(SYSEX_TYPE_NACK, req_id, reason, nullptr, 0);
+}
+
+static void process_pending_sysex_responses() {
+    PendingSysexItem item;
+    int processed = 0;
+    while (processed < 6 && dequeue_pending_sysex(&item)) {
+        switch (item.action) {
+            case PENDING_SEND_CONFIG:
+                send_config_sysex(item.req_id);
+                break;
+            case PENDING_SEND_ACK:
+                send_ack(item.req_id);
+                break;
+            case PENDING_SEND_NACK:
+                send_nack(item.req_id, item.arg);
+                break;
+            case PENDING_REBOOT_BOOTSEL:
+                delay(10);
+                rp2040.rebootToBootloader();
+                break;
+            default:
+                break;
+        }
+        processed++;
+    }
+}
+
+static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
+    if (!payload || !payload_len) return false;
+
+    memset(payload, 0, SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME);
+    payload[0] = current_settings.active_bank;
+    payload[1] = (uint8_t)bankManager.num_valid_banks();
+    for (int i = 0; i < 4; i++) {
+        payload[2 + i * 3]     = (uint8_t)current_settings.outputs[i].type;
+        payload[2 + i * 3 + 1] = current_settings.outputs[i].channel;
+        payload[2 + i * 3 + 2] = current_settings.outputs[i].note;
+    }
+    payload[14] = (uint8_t)current_settings.cv_input_role[0];
+    payload[15] = (uint8_t)current_settings.cv_input_role[1];
+    payload[16] = (uint8_t)current_settings.knob_role[0];
+    payload[17] = (uint8_t)current_settings.knob_role[1];
+    payload[18] = (uint8_t)current_settings.knob_role[2];
+
     // Append bank names (only for slots with valid headers).
     // Mask each byte to 7 bits — SysEx data bytes must be 0x00–0x7F.
     for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
-        uint8_t *dst = buf + 3 + SYSEX_DATA_LEN + (slot - 1) * SYSEX_BANK_NAME;
+        uint8_t *dst = payload + SYSEX_DATA_LEN + (slot - 1) * SYSEX_BANK_NAME;
         const BankHeader *hdr = bankManager.get_bank_header(slot);
         if (hdr) {
             for (int i = 0; i < SYSEX_BANK_NAME - 1; i++) {
@@ -73,25 +209,67 @@ static void send_config_sysex() {
             }
         }
     }
-    Serial.printf("send_config_sysex() sending %d bytes\n", sizeof(buf));
-    USBMIDI.sendClock();  // send a clock before the SysEx to wake up the host
-    USBMIDI.sendSysEx(sizeof(buf), buf, false);
+
+    *payload_len = SYSEX_DATA_LEN + (FLASH_MAX_BANKS * SYSEX_BANK_NAME);
+    return true;
+}
+
+static void send_config_sysex(uint8_t req_id) {
+    if (SYSEX_DEBUG && Serial) Serial.printf("send_config_sysex() active_bank=%i req_id=%u\n", current_settings.active_bank, req_id);
+    uint8_t payload[SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME];
+    uint16_t payload_len = 0;
+    if (!build_config_payload(payload, &payload_len)) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+    if (!send_sysex_frame(SYSEX_TYPE_CONFIG_RESP, req_id, SYSEX_STATUS_OK, payload, payload_len)) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+    }
 }
 
 static void handle_sysex(uint8_t *data, unsigned int size) {
     // The MIDI library includes 0xF0 at data[0] and 0xF7 at data[size-1].
-    // Layout: [0xF0, MFR_ID, DEVICE_ID, CMD, ...payload..., 0xF7]
-    if (size < 5) return;
+    // Layout: [0xF0, MFR_ID, DEVICE_ID, VER, TYPE, REQ_ID, STATUS, ...payload..., 0xF7]
+    if (size < 8) return;
     if (data[0] != 0xF0) return;
+    if (data[size - 1] != 0xF7) return;
     if (data[1] != SYSEX_MFR_ID || data[2] != SYSEX_DEVICE_ID) return;
 
-    const uint8_t cmd = data[3];
+    const uint8_t ver = data[3];
+    const uint8_t type = data[4];
+    const uint8_t req_id = data[5] & 0x7F;
+    const uint8_t payload_status = data[6];
+    const uint8_t *d = data + 7;
+    const unsigned payload_len = size - 8;
 
-    if (cmd == SYSEX_CMD_GET) {
-        send_config_sysex();
+    if (SYSEX_DEBUG && Serial) {
+        Serial.printf("sysex rx: ver=0x%02X type=0x%02X req=%u status=0x%02X payload=%u\n",
+            ver, type, req_id, payload_status, payload_len);
+    }
 
-    } else if (cmd == SYSEX_CMD_DATA && size >= 4 + SYSEX_DATA_LEN) {
-        const uint8_t *d = data + 4; // payload start (after F0, MFR, DEVICE, CMD)
+    if (ver != SYSEX_PROTO_VER) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_UNSUPPORTED_VERSION);
+        return;
+    }
+
+    if (type == SYSEX_TYPE_GET_CONFIG_REQ) {
+        if (payload_len != 0) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);
+
+    } else if (type == SYSEX_TYPE_SET_CONFIG_REQ) {
+        if (payload_len < SYSEX_DATA_LEN) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+
+        if (d[0] > FLASH_MAX_BANKS) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+            return;
+        }
+
         current_settings.active_bank = d[0];
         // d[1] = num_valid_banks is read-only, skip
         for (int i = 0; i < 4; i++) {
@@ -104,13 +282,23 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         current_settings.knob_role[0]     = (InputRole)d[16];
         current_settings.knob_role[1]     = (InputRole)d[17];
         current_settings.knob_role[2]     = (InputRole)d[18];
-        settings_save(&current_settings);
-        if ((int)current_settings.active_bank != bankManager.active_bank())
-            bankManager.switch_bank(current_settings.active_bank);
-        send_config_sysex(); // echo confirmation
 
-    } else if (cmd == SYSEX_CMD_REBOOT) {
-        rp2040.rebootToBootloader();
+        settings_save(&current_settings);
+        if ((int)current_settings.active_bank != bankManager.active_bank()) {
+            if (!bankManager.switch_bank(current_settings.active_bank)) {
+                enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+                return;
+            }
+        }
+
+        enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+        enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);
+
+    } else if (type == SYSEX_TYPE_REBOOT_REQ) {
+        enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+        enqueue_pending_sysex(PENDING_REBOOT_BOOTSEL, req_id);
+    } else {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_UNKNOWN_TYPE);
     }
 }
 

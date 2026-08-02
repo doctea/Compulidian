@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Compulidian Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/webmidi@3.1.12/dist/iife/webmidi.iife.min.js"></script>
 <style>
   :root {
     --bg:      #18181b;
@@ -538,7 +539,7 @@ async function flashToDevice() {
   // Reboot to BOOTSEL mode first — via MIDI if connected, otherwise instruct manually.
   if (midiOutput) {
     setStatus('Sending reboot-to-flash command via MIDI…');
-    midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_REBOOT, 0xF7]);
+    sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
     setStatus('Waiting for device to enter flash mode (2.5 s)…');
     await new Promise(r => setTimeout(r, 2500));
   } else {
@@ -590,7 +591,7 @@ async function readFromDevice() {
   // Same reboot flow as flashToDevice
   if (midiOutput) {
     setStatus('Sending reboot-to-flash command via MIDI…');
-    midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_REBOOT, 0xF7]);
+    sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
     setStatus('Waiting for device to enter flash mode (2.5 s)…');
     await new Promise(r => setTimeout(r, 2500));
   }
@@ -642,8 +643,7 @@ window.readFromDevice = readFromDevice;
 async function rebootToBootloader() {
   // Try via SysEx first (device stays running), fall back to manual instruction.
   if (midiOutput) {
-    const msg = [0xF0, 0x7D, 0x43, 0x20, 0xF7];
-    midiOutput.send(msg);
+    sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
     setStatus('Reboot command sent. Wait ~2s then connect via picoboot.');
   } else {
     setStatus('Not connected via MIDI. Hold BOOTSEL and press RESET on the Pico, then use Flash to Device.');
@@ -778,8 +778,16 @@ window.switchTab = switchTab;
 // ============================================================================
 const SYSEX_MFR_ID    = 0x7D;
 const SYSEX_DEVICE_ID = 0x43;
-const SYSEX_CMD_GET   = 0x10;
-const SYSEX_CMD_DATA  = 0x11;
+const SYSEX_PROTO_VER = 0x02;
+
+const SYSEX_TYPE_GET_CONFIG_REQ = 0x10;
+const SYSEX_TYPE_SET_CONFIG_REQ = 0x11;
+const SYSEX_TYPE_REBOOT_REQ     = 0x20;
+const SYSEX_TYPE_CONFIG_RESP    = 0x30;
+const SYSEX_TYPE_ACK            = 0x31;
+const SYSEX_TYPE_NACK           = 0x32;
+
+const SYSEX_STATUS_OK = 0x00;
 
 const OUTPUT_TYPES   = ['Audio', 'Clock', 'Gate', 'CV'];
 const INPUT_ROLES    = ['None', 'BPM', 'Density', 'Pitch', 'Bank'];
@@ -787,88 +795,493 @@ const OUTPUT_LABELS  = ['Pulse 1', 'Pulse 2', 'CV 1', 'CV 2'];
 const CV_LABELS      = ['CV 1', 'CV 2'];
 const KNOB_LABELS    = ['Main', 'X', 'Y'];
 
-let midiAccess  = null;
 let midiOutput  = null;
 let midiInput   = null;
-let currentCfg  = null;  // raw data array from last SYSEX_CMD_DATA
+let midiInputsBound = [];
+let nativeMidiAccess = null;
+let nativeInputsBound = [];
+let currentCfg  = null;  // raw config payload from last SYSEX_TYPE_CONFIG_RESP
+
+const midiPendingRequests = new Map();
+let midiNextRequestId = 1;
+let midiReconnectTimer = null;
+let midiReconnectAttempt = 0;
+let webMidiReady = false;
+let midiConnectionWatchdog = null;
+
+const MIDI_REQUEST_TIMEOUT_MS = 1500;
+const MIDI_MAX_RETRIES = 2;
+const MIDI_RECONNECT_MAX_ATTEMPTS = 8;
+const MIDI_RECONNECT_BASE_DELAY_MS = 400;
+const MIDI_DEBUG = true;
+const MIDI_BIND_ALL_INPUTS = false;
+
+function midiDebug(...args) {
+  if (!MIDI_DEBUG) return;
+  console.log('[compulidian-midi]', ...args);
+}
 
 function midiDot(on) {
   document.getElementById('midi-dot').className = 'midi-status' + (on ? ' on' : '');
 }
 
-async function midiConnect() {
-  if (!navigator.requestMIDIAccess) {
-    document.getElementById('config-status').textContent = 'Web MIDI not supported in this browser.';
-    return;
-  }
-  try {
-    midiAccess = await navigator.requestMIDIAccess({ sysex: true });
-  } catch(e) {
-    document.getElementById('config-status').textContent = 'MIDI access denied: ' + e.message;
-    return;
-  }
+function setConfigStatus(msg, isError = false, isOk = false) {
+  const el = document.getElementById('config-status');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--danger)' : (isOk ? 'var(--ok)' : 'var(--muted)');
+}
 
-  // Find Compulidian input and output
-  midiOutput = null; midiInput = null;
-  for (const out of midiAccess.outputs.values()) {
-    if (out.name.toLowerCase().includes('compulidian')) { midiOutput = out; break; }
+function matchesCompulidianName(device) {
+  return !!device && !!device.name && device.name.toLowerCase().includes('compulidian');
+}
+
+function getMidiOutputs() {
+  return WebMidi.outputs || [];
+}
+
+function getMidiInputs() {
+  return WebMidi.inputs || [];
+}
+
+function clearPendingRequests(errMsg) {
+  const err = new Error(errMsg);
+  for (const [reqId, pending] of midiPendingRequests.entries()) {
+    clearTimeout(pending.timeoutId);
+    pending.reject(err);
+    midiPendingRequests.delete(reqId);
   }
-  console.log('MIDI inputs: ', Array.from(midiAccess.inputs.values()).map(i => i.name));
-  for (const inp of midiAccess.inputs.values()) {
-    if (inp.name.toLowerCase().includes('compulidian')) {
-      midiInput = inp;
-      midiInput.onmidimessage = onMidiMessage;
-      break;
+}
+
+function clearReconnectTimer() {
+  if (midiReconnectTimer) {
+    clearTimeout(midiReconnectTimer);
+    midiReconnectTimer = null;
+  }
+}
+
+function clearConnectionWatchdog() {
+  if (midiConnectionWatchdog) {
+    clearInterval(midiConnectionWatchdog);
+    midiConnectionWatchdog = null;
+  }
+}
+
+function clearInputBindings() {
+  for (const input of midiInputsBound) {
+    try {
+      if (input && typeof input.removeListener === 'function') {
+        input.removeListener('sysex');
+      }
+    } catch (e) {
+      console.warn('Failed to detach MIDI listener:', e);
     }
   }
+  midiInputsBound = [];
 
-  if (!midiOutput || !midiInput) {
-    const outs = Array.from(midiAccess.outputs.values()).map(o => `"${o.name}"`).join(', ');
-    const ins  = Array.from(midiAccess.inputs.values()).map(i  => `"${i.name}"`).join(', ');
-    document.getElementById('config-status').textContent =
-        `Compulidian not found. Available outputs: [${outs||'none'}]  inputs: [${ins||'none'}].`;
+  for (const input of nativeInputsBound) {
+    try {
+      if (input) input.onmidimessage = null;
+    } catch (e) {
+      console.warn('Failed to detach native MIDI listener:', e);
+    }
+  }
+  nativeInputsBound = [];
+}
+
+function resetMidiBinding() {
+  clearConnectionWatchdog();
+  clearInputBindings();
+  midiInput = null;
+  midiOutput = null;
+  midiDot(false);
+  document.getElementById('midi-device-name').textContent = 'Not connected';
+}
+
+function bindMidiInputListener(input) {
+  if (!input) return;
+  input.removeListener('sysex');
+  input.addListener('sysex', e => {
+    const raw = (e && e.message && e.message.rawData) ? Array.from(e.message.rawData)
+      : (e && e.rawData) ? Array.from(e.rawData)
+      : (e && e.data) ? Array.from(e.data)
+      : [];
+    midiDebug('rx raw sysex', raw);
+    handleIncomingSysex(raw);
+  });
+}
+
+function bindAllMatchingInputs(inputs) {
+  clearInputBindings();
+  const matches = MIDI_BIND_ALL_INPUTS
+    ? (inputs || [])
+    : (inputs || []).filter(matchesCompulidianName);
+  for (const input of matches) {
+    bindMidiInputListener(input);
+  }
+  midiInputsBound = matches;
+
+  if (nativeMidiAccess) {
+    const nativeInputs = MIDI_BIND_ALL_INPUTS
+      ? Array.from(nativeMidiAccess.inputs.values())
+      : Array.from(nativeMidiAccess.inputs.values()).filter(matchesCompulidianName);
+    for (const input of nativeInputs) {
+      input.onmidimessage = ev => {
+        const raw = Array.from(ev.data || []);
+        midiDebug('rx raw sysex (native)', raw);
+        handleIncomingSysex(raw);
+      };
+    }
+    nativeInputsBound = nativeInputs;
+    midiDebug('native listeners bound', nativeInputs.map(i => ({ name: i.name, id: i.id })));
+  }
+
+  return matches;
+}
+
+function onAnyMidiStateChange() {
+  const oldInIds = midiInputsBound.map(i => i.id).sort().join('|');
+  const oldOutId = midiOutput ? midiOutput.id : null;
+  const ports = pickCompulidianPorts();
+  if (!ports.input || !ports.output) {
+    resetMidiBinding();
+    clearPendingRequests('Device disconnected');
+    setConfigStatus('Device disconnected. Reconnecting…', true, false);
+    scheduleReconnect();
     return;
   }
 
-  if (midiOutput) {
+  const newInputs = ports.ins.filter(matchesCompulidianName);
+  const newInIds = newInputs.map(i => i.id).sort().join('|');
+  const changed = newInIds !== oldInIds || ports.output.id !== oldOutId;
+  if (changed) {
+    bindAllMatchingInputs(ports.ins);
+    midiInput = newInputs.length > 0 ? newInputs[0] : ports.input;
+    midiOutput = ports.output;
     midiDot(true);
     document.getElementById('midi-device-name').textContent = midiOutput.name;
-    document.getElementById('config-status').textContent = 'Connected. Requesting config…';
-    readConfig();
-  } else {
-    document.getElementById('config-status').textContent = 'No MIDI device found. Is Compulidian connected?';
+    midiDebug('state change rebound', {
+      output: { name: midiOutput.name, id: midiOutput.id },
+      inputs: midiInputsBound.map(i => ({ name: i.name, id: i.id }))
+    });
+    setConfigStatus('MIDI device changed. Ready.', false, true);
+  }
+}
+
+function scheduleReconnect() {
+  if (midiReconnectTimer || midiReconnectAttempt >= MIDI_RECONNECT_MAX_ATTEMPTS) {
+    if (midiReconnectAttempt >= MIDI_RECONNECT_MAX_ATTEMPTS) {
+      setConfigStatus('Reconnect failed. Click Connect via Web MIDI.', true, false);
+    }
+    return;
+  }
+  const delay = MIDI_RECONNECT_BASE_DELAY_MS * Math.pow(2, Math.min(midiReconnectAttempt, 4));
+  midiReconnectAttempt++;
+  midiReconnectTimer = setTimeout(async () => {
+    midiReconnectTimer = null;
+    try {
+      await midiConnect(true);
+    } catch (e) {
+      console.warn('Reconnect attempt failed:', e);
+      scheduleReconnect();
+    }
+  }, delay);
+}
+
+function allocRequestId() {
+  for (let i = 0; i < 127; i++) {
+    const reqId = midiNextRequestId;
+    midiNextRequestId = (midiNextRequestId % 127) + 1;
+    if (!midiPendingRequests.has(reqId)) return reqId;
+  }
+  throw new Error('No free request IDs available');
+}
+
+function sendCompulidianSysexFrame(type, reqId = 0, status = 0, payload = []) {
+  if (!midiOutput) throw new Error('No MIDI output selected');
+  midiDebug('tx sysex', { type, reqId, status, payloadLen: payload.length, payload });
+  midiOutput.sendSysex(SYSEX_MFR_ID, [
+    SYSEX_DEVICE_ID,
+    SYSEX_PROTO_VER,
+    type & 0x7F,
+    reqId & 0x7F,
+    status & 0x7F,
+    ...payload
+  ]);
+}
+
+function pickCompulidianPorts() {
+  const outs = getMidiOutputs();
+  const ins = getMidiInputs();
+  const outputMatches = outs.filter(matchesCompulidianName);
+  const inputMatches = ins.filter(matchesCompulidianName);
+  const output = outputMatches[0] || null;
+  const input = inputMatches[0] || null;
+  return { output, input, outs, ins, outputMatches, inputMatches };
+}
+
+function ensureConnectionWatchdog() {
+  if (midiConnectionWatchdog) return;
+  midiConnectionWatchdog = setInterval(() => {
+    const ports = pickCompulidianPorts();
+    const hasDevice = !!ports.output && !!ports.input;
+    const isConnected = !!midiOutput && !!midiInput;
+    if (!hasDevice && isConnected) {
+      midiDebug('watchdog detected disconnect');
+      resetMidiBinding();
+      clearPendingRequests('Device disconnected');
+      setConfigStatus('Device disconnected. Reconnecting…', true, false);
+      scheduleReconnect();
+    }
+  }, 800);
+}
+
+function normalizeSysexData(data) {
+  if (!data || data.length < 4) return null;
+  const bytes = Array.from(data);
+  if (bytes[0] === 0xF0) {
+    if (bytes[bytes.length - 1] !== 0xF7) return null;
+    return bytes.slice(1, bytes.length - 1);
+  }
+  return bytes;
+}
+
+function decodeV2Frame(bytes) {
+  if (bytes[0] === SYSEX_MFR_ID && bytes[1] === SYSEX_DEVICE_ID && bytes.length >= 6) {
+    return {
+      ver: bytes[2],
+      msgType: bytes[3],
+      reqId: bytes[4] & 0x7F,
+      status: bytes[5] & 0x7F,
+      payload: bytes.slice(6),
+      layout: 'mfr-device-ver'
+    };
+  }
+  if (bytes[0] === SYSEX_DEVICE_ID && bytes.length >= 5) {
+    return {
+      ver: bytes[1],
+      msgType: bytes[2],
+      reqId: bytes[3] & 0x7F,
+      status: bytes[4] & 0x7F,
+      payload: bytes.slice(5),
+      layout: 'device-ver'
+    };
+  }
+  if (bytes[0] === SYSEX_PROTO_VER && bytes.length >= 4) {
+    return {
+      ver: bytes[0],
+      msgType: bytes[1],
+      reqId: bytes[2] & 0x7F,
+      status: bytes[3] & 0x7F,
+      payload: bytes.slice(4),
+      layout: 'ver-only'
+    };
+  }
+  return null;
+}
+
+function handleIncomingSysex(rawData) {
+  const bytes = normalizeSysexData(rawData);
+  if (!bytes) return;
+
+  const frame = decodeV2Frame(bytes);
+  if (!frame) {
+    midiDebug('rx unrecognized sysex layout', bytes);
+    return;
+  }
+  if (frame.ver !== SYSEX_PROTO_VER) {
+    midiDebug('rx wrong protocol version', frame);
+    return;
+  }
+
+  const { msgType, reqId, status, payload } = frame;
+  midiDebug('rx decoded frame', { msgType, reqId, status, payloadLen: payload.length, layout: frame.layout });
+
+  if (msgType === SYSEX_TYPE_CONFIG_RESP) {
+    currentCfg = payload;
+    applyCfgToUI(currentCfg);
+    setConfigStatus('Config loaded from device.', false, true);
+  }
+
+  let pending = midiPendingRequests.get(reqId);
+  let effectiveReqId = reqId;
+  if (!pending && msgType === SYSEX_TYPE_CONFIG_RESP && midiPendingRequests.size === 1) {
+    // Some browser/device stacks can remap request IDs across bridges.
+    // If only one request is in flight, safely treat config response as that request.
+    const first = midiPendingRequests.entries().next().value;
+    if (first) {
+      effectiveReqId = first[0];
+      pending = first[1];
+      midiDebug('reqId remap fallback', { incomingReqId: reqId, mappedReqId: effectiveReqId });
+    }
+  }
+  if (!pending) return;
+
+  if (msgType === SYSEX_TYPE_NACK) {
+    clearTimeout(pending.timeoutId);
+    midiPendingRequests.delete(effectiveReqId);
+    pending.reject(new Error('Device NACK ' + status));
+    return;
+  }
+
+  const expected = pending.expectedTypes.includes(msgType);
+  if (!expected) return;
+
+  clearTimeout(pending.timeoutId);
+  midiPendingRequests.delete(effectiveReqId);
+
+  pending.resolve({ type: msgType, status, payload });
+}
+
+async function ensureMidiEnabled() {
+  if (typeof WebMidi === 'undefined' || typeof WebMidi.enable !== 'function') {
+    throw new Error('webmidi.js failed to load');
+  }
+  if (!webMidiReady) {
+    await WebMidi.enable({ sysex: true });
+    midiDebug('WebMidi enabled', {
+      inputs: (WebMidi.inputs || []).map(d => d.name),
+      outputs: (WebMidi.outputs || []).map(d => d.name)
+    });
+    WebMidi.addListener('connected', onAnyMidiStateChange);
+    WebMidi.addListener('disconnected', onAnyMidiStateChange);
+    webMidiReady = true;
+  }
+
+  // Native MIDIAccess fallback for SysEx reception diagnostics/reliability.
+  midiDebug('native requestMIDIAccess availability', typeof navigator.requestMIDIAccess);
+  if (!nativeMidiAccess && navigator.requestMIDIAccess) {
+    try {
+      nativeMidiAccess = await navigator.requestMIDIAccess({ sysex: true });
+      midiDebug('Native MIDIAccess enabled', {
+        inputs: Array.from(nativeMidiAccess.inputs.values()).map(d => d.name),
+        outputs: Array.from(nativeMidiAccess.outputs.values()).map(d => d.name)
+      });
+    } catch (e) {
+      midiDebug('Native MIDIAccess unavailable', e.message || e);
+    }
+  } else if (!navigator.requestMIDIAccess) {
+    midiDebug('Native MIDIAccess unavailable', 'navigator.requestMIDIAccess is undefined');
+  }
+}
+
+function requestSysexResponse(type, payload = [], expectedTypes = [SYSEX_TYPE_CONFIG_RESP], timeoutMs = MIDI_REQUEST_TIMEOUT_MS, retries = MIDI_MAX_RETRIES) {
+  return new Promise((resolve, reject) => {
+    const reqId = allocRequestId();
+    const trySend = (attempt) => {
+      const timeoutId = setTimeout(() => {
+        midiPendingRequests.delete(reqId);
+        midiDebug('request timeout', { type, reqId, attempt, retries });
+        if (attempt < retries) {
+          trySend(attempt + 1);
+        } else {
+          reject(new Error('Timed out waiting for MIDI SysEx response'));
+        }
+      }, timeoutMs);
+
+      midiPendingRequests.set(reqId, { expectedTypes, resolve, reject, timeoutId });
+
+      try {
+        sendCompulidianSysexFrame(type, reqId, SYSEX_STATUS_OK, payload);
+      } catch (e) {
+        clearTimeout(timeoutId);
+        midiPendingRequests.delete(reqId);
+        reject(e);
+      }
+    };
+
+    trySend(0);
+  });
+}
+
+async function midiConnect(isReconnectAttempt = false) {
+  clearReconnectTimer();
+  try {
+    await ensureMidiEnabled();
+  } catch(e) {
+    setConfigStatus('MIDI access failed: ' + e.message, true, false);
+    return;
+  }
+
+  const ports = pickCompulidianPorts();
+  midiDebug('connect ports', {
+    outputs: ports.outs.map(o => ({ name: o.name, id: o.id })),
+    inputs: ports.ins.map(i => ({ name: i.name, id: i.id }))
+  });
+  midiOutput = ports.output;
+  const inputMatches = ports.ins.filter(matchesCompulidianName);
+  midiInput = inputMatches.length > 0 ? inputMatches[0] : ports.input;
+
+  if (!midiOutput || !midiInput) {
+    const outs = ports.outs.map(o => `"${o.name}"`).join(', ');
+    const ins  = ports.ins.map(i => `"${i.name}"`).join(', ');
+    setConfigStatus(
+      `Compulidian not found. Available outputs: [${outs||'none'}]  inputs: [${ins||'none'}].`,
+      true,
+      false
+    );
+    if (!isReconnectAttempt) {
+      scheduleReconnect();
+    }
+    return;
+  }
+
+  bindAllMatchingInputs(ports.ins);
+  midiInput = midiInputsBound.length > 0 ? midiInputsBound[0] : midiInput;
+  midiDot(true);
+  ensureConnectionWatchdog();
+  midiReconnectAttempt = 0;
+  document.getElementById('midi-device-name').textContent = midiOutput.name;
+  midiDebug('selected ports', {
+    output: { name: midiOutput.name, id: midiOutput.id },
+    inputs: midiInputsBound.map(i => ({ name: i.name, id: i.id }))
+  });
+  setConfigStatus('Connected. Requesting config…', false, false);
+
+  try {
+    await readConfig();
+  } catch (e) {
+    setConfigStatus('Connected, but config read failed: ' + e.message, true, false);
   }
 }
 window.midiConnect = midiConnect;
 
-function onMidiMessage(ev) {
-  const data = ev.data;
-  console.log('MIDI IN:', data);
-  if (data[0] !== 0xF0 || data[data.length - 1] !== 0xF7) return;
-  // Strip F0 and F7
-  const payload = data.slice(1, data.length - 1);
-  if (payload[0] !== SYSEX_MFR_ID || payload[1] !== SYSEX_DEVICE_ID) return;
-  if (payload[2] === SYSEX_CMD_DATA) {
-    currentCfg = payload.slice(3); // active_bank, num_valid_banks, settings..., [bank names]
-    applyCfgToUI(currentCfg);
-    document.getElementById('config-status').textContent = '✓ Config loaded from device.';
+async function readConfig() {
+  if (!midiOutput) {
+    setConfigStatus('Not connected.', true, false);
+    throw new Error('Not connected');
+  }
+  await requestSysexResponse(
+    SYSEX_TYPE_GET_CONFIG_REQ,
+    [],
+    [SYSEX_TYPE_CONFIG_RESP]
+  );
+}
+window.readConfig = () => readConfig().catch(e => {
+  console.warn('readConfig failed:', e);
+});
+
+async function saveConfig() {
+  if (!midiOutput) {
+    setConfigStatus('Not connected.', true, false);
+    throw new Error('Not connected');
+  }
+  const d = buildCfgFromUI();
+  setConfigStatus('Config sent. Waiting for confirmation…', false, false);
+  try {
+    await requestSysexResponse(
+      SYSEX_TYPE_SET_CONFIG_REQ,
+      d,
+      [SYSEX_TYPE_CONFIG_RESP]
+    );
+    setConfigStatus('Config saved and confirmed by device.', false, true);
+  } catch (e) {
+    setConfigStatus('Config send failed: ' + e.message, true, false);
+    throw e;
   }
 }
-
-function readConfig() {
-  if (!midiOutput) { document.getElementById('config-status').textContent = 'Not connected.'; return; }
-  midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_GET, 0xF7]);
-}
-window.readConfig = readConfig;
-
-function saveConfig() {
-  if (!midiOutput) { document.getElementById('config-status').textContent = 'Not connected.'; return; }
-  const d = buildCfgFromUI();
-  const msg = [0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_DATA, ...d, 0xF7];
-  midiOutput.send(msg);
-  document.getElementById('config-status').textContent = 'Config sent. Waiting for confirmation…';
-}
-window.saveConfig = saveConfig;
+window.saveConfig = () => saveConfig().catch(e => {
+  console.warn('saveConfig failed:', e);
+});
 
 // ============================================================================
 // Config UI rendering

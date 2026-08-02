@@ -319,6 +319,7 @@ void __not_in_flash_func(loop)() {
 
   #ifdef USE_TINYUSB
     tud_task();
+    process_pending_sysex_responses();
     //if (ticked) 
     //ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
     {
