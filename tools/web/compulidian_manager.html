@@ -200,6 +200,11 @@
     <button class="btn" onclick="readConfig()">↺ Read from Device</button>
   </div>
   <div id="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
+  <div class="row" style="margin-top:.5rem">
+    <button class="btn" onclick="clearMidiLog()">Clear MIDI Log</button>
+    <span id="midi-runtime-tag" style="font-size:.75rem;color:var(--muted)"></span>
+  </div>
+  <pre id="midi-debug-log" style="margin-top:.5rem;max-height:180px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;color:var(--muted);white-space:pre-wrap"></pre>
 
 </div><!-- /tab-config -->
 
@@ -774,8 +779,22 @@ function switchTab(name, btn) {
 window.switchTab = switchTab;
 
 // ============================================================================
-// Config tab — Web MIDI
+// Config tab — Web MIDI transport
 // ============================================================================
+// Transport map (v2 SysEx):
+// - Browser sends GET/SET/REBOOT requests with a request ID.
+// - Device replies with CONFIG_RESP (and ACK/NACK where applicable).
+// - Pending requests are resolved by request ID, with a safe fallback when a
+//   single in-flight request receives a remapped response ID.
+// - Connection state is maintained by both WebMidi state events and a periodic
+//   watchdog that detects silent disconnects.
+//
+// Maintenance knobs:
+// - MIDI_DEBUG: mirrors logs to browser console.
+// - MIDI_BIND_ALL_INPUTS: diagnostic mode to listen on all inputs.
+// - MIDI_REQUEST_TIMEOUT_MS / MIDI_MAX_RETRIES: request reliability tuning.
+// - MIDI_RECONNECT_* and MIDI_WATCHDOG_INTERVAL_MS: reconnect behavior.
+
 const SYSEX_MFR_ID    = 0x7D;
 const SYSEX_DEVICE_ID = 0x43;
 const SYSEX_PROTO_VER = 0x02;
@@ -813,12 +832,50 @@ const MIDI_REQUEST_TIMEOUT_MS = 1500;
 const MIDI_MAX_RETRIES = 2;
 const MIDI_RECONNECT_MAX_ATTEMPTS = 8;
 const MIDI_RECONNECT_BASE_DELAY_MS = 400;
+const MIDI_WATCHDOG_INTERVAL_MS = 800;
 const MIDI_DEBUG = true;
 const MIDI_BIND_ALL_INPUTS = false;
+const MIDI_LOG_MAX_LINES = 220;
+const MIDI_RUNTIME_TAG = 'midi-runtime-2026-08-02';
+
+// ---------------------------------------------------------------------------
+// Logging helpers
+// ---------------------------------------------------------------------------
+function serializeLogArg(value) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function appendMidiLogLine(line) {
+  const el = document.getElementById('midi-debug-log');
+  if (!el) return;
+  const lines = (el.textContent || '').split('\n').filter(Boolean);
+  lines.push(line);
+  if (lines.length > MIDI_LOG_MAX_LINES) {
+    lines.splice(0, lines.length - MIDI_LOG_MAX_LINES);
+  }
+  el.textContent = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearMidiLog() {
+  const el = document.getElementById('midi-debug-log');
+  if (el) el.textContent = '';
+}
+window.clearMidiLog = clearMidiLog;
 
 function midiDebug(...args) {
-  if (!MIDI_DEBUG) return;
-  console.log('[compulidian-midi]', ...args);
+  const ts = new Date().toISOString().split('T')[1].replace('Z', '');
+  const body = args.map(serializeLogArg).join(' ');
+  const line = `[${ts}] ${body}`;
+  appendMidiLogLine(line);
+  if (MIDI_DEBUG) {
+    console.log('[compulidian-midi]', ...args);
+  }
 }
 
 function midiDot(on) {
@@ -833,6 +890,14 @@ function setConfigStatus(msg, isError = false, isOk = false) {
 
 function matchesCompulidianName(device) {
   return !!device && !!device.name && device.name.toLowerCase().includes('compulidian');
+}
+
+function getCompulidianInputs(inputs) {
+  return (inputs || []).filter(matchesCompulidianName);
+}
+
+function getCompulidianOutputs(outputs) {
+  return (outputs || []).filter(matchesCompulidianName);
 }
 
 function getMidiOutputs() {
@@ -866,6 +931,9 @@ function clearConnectionWatchdog() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Binding and connection lifecycle
+// ---------------------------------------------------------------------------
 function clearInputBindings() {
   for (const input of midiInputsBound) {
     try {
@@ -914,7 +982,7 @@ function bindAllMatchingInputs(inputs) {
   clearInputBindings();
   const matches = MIDI_BIND_ALL_INPUTS
     ? (inputs || [])
-    : (inputs || []).filter(matchesCompulidianName);
+    : getCompulidianInputs(inputs);
   for (const input of matches) {
     bindMidiInputListener(input);
   }
@@ -923,7 +991,7 @@ function bindAllMatchingInputs(inputs) {
   if (nativeMidiAccess) {
     const nativeInputs = MIDI_BIND_ALL_INPUTS
       ? Array.from(nativeMidiAccess.inputs.values())
-      : Array.from(nativeMidiAccess.inputs.values()).filter(matchesCompulidianName);
+      : getCompulidianInputs(Array.from(nativeMidiAccess.inputs.values()));
     for (const input of nativeInputs) {
       input.onmidimessage = ev => {
         const raw = Array.from(ev.data || []);
@@ -950,7 +1018,7 @@ function onAnyMidiStateChange() {
     return;
   }
 
-  const newInputs = ports.ins.filter(matchesCompulidianName);
+  const newInputs = ports.inputMatches;
   const newInIds = newInputs.map(i => i.id).sort().join('|');
   const changed = newInIds !== oldInIds || ports.output.id !== oldOutId;
   if (changed) {
@@ -1009,11 +1077,14 @@ function sendCompulidianSysexFrame(type, reqId = 0, status = 0, payload = []) {
   ]);
 }
 
+// ---------------------------------------------------------------------------
+// Port discovery and watchdog
+// ---------------------------------------------------------------------------
 function pickCompulidianPorts() {
   const outs = getMidiOutputs();
   const ins = getMidiInputs();
-  const outputMatches = outs.filter(matchesCompulidianName);
-  const inputMatches = ins.filter(matchesCompulidianName);
+  const outputMatches = getCompulidianOutputs(outs);
+  const inputMatches = getCompulidianInputs(ins);
   const output = outputMatches[0] || null;
   const input = inputMatches[0] || null;
   return { output, input, outs, ins, outputMatches, inputMatches };
@@ -1032,9 +1103,12 @@ function ensureConnectionWatchdog() {
       setConfigStatus('Device disconnected. Reconnecting…', true, false);
       scheduleReconnect();
     }
-  }, 800);
+  }, MIDI_WATCHDOG_INTERVAL_MS);
 }
 
+// ---------------------------------------------------------------------------
+// SysEx frame decoding
+// ---------------------------------------------------------------------------
 function normalizeSysexData(data) {
   if (!data || data.length < 4) return null;
   const bytes = Array.from(data);
@@ -1079,6 +1153,9 @@ function decodeV2Frame(bytes) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Incoming frame dispatch
+// ---------------------------------------------------------------------------
 function handleIncomingSysex(rawData) {
   const bytes = normalizeSysexData(rawData);
   if (!bytes) return;
@@ -1132,6 +1209,9 @@ function handleIncomingSysex(rawData) {
   pending.resolve({ type: msgType, status, payload });
 }
 
+// ---------------------------------------------------------------------------
+// Transport bootstrap and request/response API
+// ---------------------------------------------------------------------------
 async function ensureMidiEnabled() {
   if (typeof WebMidi === 'undefined' || typeof WebMidi.enable !== 'function') {
     throw new Error('webmidi.js failed to load');
@@ -1208,7 +1288,7 @@ async function midiConnect(isReconnectAttempt = false) {
     inputs: ports.ins.map(i => ({ name: i.name, id: i.id }))
   });
   midiOutput = ports.output;
-  const inputMatches = ports.ins.filter(matchesCompulidianName);
+  const inputMatches = ports.inputMatches;
   midiInput = inputMatches.length > 0 ? inputMatches[0] : ports.input;
 
   if (!midiOutput || !midiInput) {
@@ -1378,6 +1458,14 @@ function buildCfgFromUI() {
 renderOutputs();
 renderCVInputs();
 renderKnobs();
+
+const midiRuntimeTagEl = document.getElementById('midi-runtime-tag');
+if (midiRuntimeTagEl) {
+  const nativeAvail = typeof navigator.requestMIDIAccess;
+  midiRuntimeTagEl.textContent = `Runtime ${MIDI_RUNTIME_TAG} | native MIDIAccess: ${nativeAvail}`;
+}
+midiDebug('runtime', MIDI_RUNTIME_TAG);
+midiDebug('page loaded', new Date().toISOString());
 
 // Show warning when opened as file:// (ES modules and WebUSB/MIDI won't work)
 if (location.protocol === 'file:') {
