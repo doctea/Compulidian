@@ -78,3 +78,11 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 - add more default patterns than four-on-floor that can be chosen somehow (eg breakbeat patterns)
 
 open to collaboration and welcome feedback 🙂
+
+
+
+----
+
+
+couple more ideas before i forget:-
+- allow multiple samples to be assigned to same midi note -> round robin / random

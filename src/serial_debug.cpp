@@ -9,6 +9,7 @@
 #include "audio/flash_layout.h"
 #include "audio/bank_header.h"
 #include "settings.h"
+#include "configurator.h"
 
 #ifdef USE_TINYUSB
 
@@ -125,30 +126,71 @@
             Serial.printf("ENV_NAME: %s\n", ENV_NAME);
             Serial.printf("Built at " __TIME__ " on " __DATE__ "\n");
         } else if (serial_input_buffer[0]=='b') {
-          // re-print bank detection status
-          Serial.printf("--- Bank status (active=%d, valid_count=%d) ---\n",
-              bankManager.active_bank(), bankManager.num_valid_banks());
-          Serial.printf("Flash: XIP_BASE=0x%08X  BANKS_OFFSET=0x%08X  BANK_SIZE=0x%08X  MAX=%d\n",
-              XIP_BASE, FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
-          for (int slot = 0; slot <= FLASH_MAX_BANKS; ++slot) {
-              if (slot == 0) {
-                  Serial.printf("  slot 0: compiled-in  valid=%s\n",
-                      bankManager.is_bank_valid(0) ? "yes" : "no");
-                  continue;
-              }
+          // re-print bank detection status with per-sample detail
+          Serial.printf("--- Banks: active=%d  valid=%d  flash=0x%08X+0x%08X  max=%d ---\n",
+              bankManager.active_bank(), bankManager.num_valid_banks(),
+              FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
+          Serial.printf("  slot 0: compiled-in  valid=%s  voices=%d\n",
+              bankManager.is_bank_valid(0) ? "yes" : "no", NUM_VOICES);
+          for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
               uint32_t addr = flash_bank_xip_addr(slot);
               const BankHeader *hdr = reinterpret_cast<const BankHeader *>(addr);
               bool ok = bankManager.is_bank_valid(slot);
-              Serial.printf("  slot %d @ 0x%08X: %s  magic=0x%08X ver=%u n=%u name='%.*s'\n",
+              Serial.printf("  slot %d @ 0x%08X: %s  magic=0x%08X  n=%u  name='%.*s'\n",
                   slot, addr,
-                  ok ? "VALID  " : "empty  ",
-                  hdr->magic, hdr->version, hdr->num_samples,
-                  31, hdr->bank_name);
+                  ok ? "VALID" : "empty",
+                  hdr->magic, hdr->num_samples, 31, hdr->bank_name);
+              if (ok) {
+                  for (uint32_t i = 0; i < hdr->num_samples && i < MAX_SAMPLES_PER_BANK; i++) {
+                      const BankEntryHeader &e = hdr->entries[i];
+                      float dur = e.sample_rate > 0 ? (float)e.num_samples / e.sample_rate : 0.f;
+                      const char *note_name = "";
+                      switch (e.midi_note) {
+                          case 35: note_name="AcBD"; break; case 36: note_name="BD";   break;
+                          case 37: note_name="Rim";  break; case 38: note_name="SD";   break;
+                          case 39: note_name="Clap"; break; case 40: note_name="ElSD"; break;
+                          case 42: note_name="CHH";  break; case 44: note_name="PHH";  break;
+                          case 46: note_name="OHH";  break; case 49: note_name="Crs";  break;
+                          case 51: note_name="Ride"; break; case 50: note_name="HiTm"; break;
+                          case 48: note_name="MdTm"; break; case 45: note_name="LoTm"; break;
+                          case 43: note_name="FlTm"; break; case 56: note_name="Cowb"; break;
+                          default: note_name="";     break;
+                      }
+                      Serial.printf("    [%2u] %-23s  note=%3u %-4s  vol=%3u  %5u Hz  %ub=%u (%.2fs)\n",
+                          i, e.name[0] ? e.name : "(unnamed)",
+                          e.midi_note, note_name,
+                          e.volume, e.sample_rate,
+                          e.bit_depth, e.num_samples, dur);
+                  }
+              }
           }
-          Serial.printf("--- Settings: active_bank=%u ---\n",
-              (unsigned)settings_load().active_bank);
+          Serial.printf("---\n");
+        } else if (serial_input_buffer[0]=='B') {
+          // switch to a different bank
+          int desired_bank = atoi(&serial_input_buffer[2]);
+          if (bankManager.switch_bank(desired_bank)) {
+              Serial.printf("Switched to bank %d\n", desired_bank);
+          } else {
+              Serial.printf("Failed to switch to bank %d\n", desired_bank);
+          }
+        } else if (serial_input_buffer[0]=='X') {
+          // send config to the host (for debugging)
+          send_config_sysex();
         } else if (serial_input_buffer[0]=='?') {
-          Serial.println("Commands: b=bank status  l=list patterns  s=interpolation  c=calc mode  v=volume  V=version  I=input debug  d/D=param debug");
+          Serial.println(
+            "Commands: "
+            "p [pattern_name]=trigger pattern  "
+            "f=toggle fills  "
+            "b=bank status  "
+            "B [N]=switch to bank N  "
+            "l=list patterns  "
+            "s=interpolation  "
+            "c=calc mode  "
+            "v=volume  "
+            "V=version  "
+            "I=input debug  "
+            "d/D=param debug"
+          );
         }
         serial_input_buffer_index = 0;
       } else {

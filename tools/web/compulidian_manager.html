@@ -86,8 +86,9 @@
        ondragleave="this.classList.remove('over')"
        ondrop="handleDrop(event)">
     <input type="file" id="fileInput" multiple accept="audio/*" onchange="handleFileInput(this.files)">
+    <input type="file" id="uf2Input" accept=".uf2" style="display:none" onchange="handleUF2Input(this.files)">
     <p>Drop WAV / MP3 / OGG / FLAC files here, or click to browse</p>
-    <p style="font-size:.8rem;margin-top:.4rem">Files are converted to 16-bit PCM mono in the browser</p>
+    <p style="font-size:.8rem;margin-top:.4rem">Files are converted to 16-bit PCM mono in the browser — or <a href="#" onclick="document.getElementById('uf2Input').click();return false">load an existing .uf2 bank</a></p>
   </div>
 
   <table id="sample-table">
@@ -117,8 +118,8 @@
     <div class="col">
       <label>Flash size</label>
       <select id="flash-size" onchange="updateSlotOptions()">
-        <option value="2">2 MB (standard Pico)</option>
-        <option value="16">16 MB (extended flash)</option>
+        <option value="2">2 MB (standard Pico — no user banks)</option>
+        <option value="16" selected>16 MB (extended flash)</option>
       </select>
     </div>
     <div class="col">
@@ -215,6 +216,63 @@ const FLASH_BANK_SIZE_16MB = 0x00380000;  // 3.5 MB per bank, 4 banks = 14 MB
 function bankXipAddr(slot, flashMB) {
   const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
   return XIP_BASE + FLASH_BANKS_OFFSET + (slot - 1) * bankSize;
+}
+
+// ============================================================================
+// GM percussion map + filename-to-note hinting
+// ============================================================================
+const GM_PERC = {
+  35:'Acoustic BD', 36:'Bass Drum',    37:'Rim Shot',    38:'Snare',
+  39:'Hand Clap',   40:'Elec Snare',   41:'Lo Floor Tom',42:'Closed HH',
+  43:'Hi Floor Tom',44:'Pedal HH',     45:'Low Tom',     46:'Open HH',
+  47:'Lo-Mid Tom',  48:'Hi-Mid Tom',   49:'Crash Cym 1', 50:'High Tom',
+  51:'Ride Cym 1',  52:'Chinese Cym',  53:'Ride Bell',   54:'Tambourine',
+  55:'Splash Cym',  56:'Cowbell',      57:'Crash Cym 2', 59:'Ride Cym 2',
+  60:'Hi Bongo',    61:'Lo Bongo',     62:'Mute Hi Conga',63:'Open Hi Conga',
+  64:'Lo Conga',    65:'Hi Timbale',   66:'Lo Timbale',  69:'Cabasa',
+  70:'Maracas',     75:'Claves',       76:'Hi Wood Blk', 77:'Lo Wood Blk',
+  80:'Mute Triangle',81:'Open Triangle',
+};
+
+function noteSelectHtml(idx, val) {
+  const opts = Object.entries(GM_PERC).map(([n, name]) =>
+    `<option value="${n}"${parseInt(n)===val?' selected':''}>${n} \u2014 ${name}</option>`
+  ).join('');
+  return `<select onchange="samples[${idx}].midiNote=parseInt(this.value)" style="font-size:.75rem;width:150px">${opts}</select>`;
+}
+
+// Heuristic: map filename keywords to GM note numbers.
+// Longer / more specific patterns are listed first.
+const FILENAME_HINTS = [
+  [36, ['kick','bass.drum','bassdrum','bass_drum','bd ','_bd.','bd_']],
+  [35, ['acoustic.bass','abd','acoustic_bd']],
+  [38, ['snare','snar','_sn.','_sn_',' sn ','sd ','_sd.']],
+  [37, ['rimshot','rim.shot','side.stick','rim_']],
+  [39, ['clap','handclap','_cp.','_cp_']],
+  [46, ['open.h','openhat','open_hat','open.hat','ohh','_oh.']],
+  [44, ['pedal.h','pedalhat','pedal_hat','_ph.']],
+  [42, ['hihat','hi-hat','hi_hat','closed.h','chh','_hh.','_ch.']],
+  [49, ['crash','_cy.','cym1']],
+  [51, ['ride','_rc.']],
+  [50, ['high.tom','hi.tom','hi_tom','_ht.']],
+  [48, ['hi.mid','himid','hi_mid']],
+  [47, ['lo.mid','lomid','lo_mid']],
+  [45, ['low.tom','lo.tom','lo_tom','_lt.']],
+  [43, ['floor.tom','floor_tom','_ft.']],
+  [41, ['lo.floor']],
+  [56, ['cowbell','cow_','_cb.']],
+  [54, ['tamb']],
+  [75, ['claves']],
+];
+
+function guessNoteFromFilename(filename) {
+  const n = filename.toLowerCase().replace(/[^a-z0-9.]+/g, '.');
+  for (const [note, words] of FILENAME_HINTS) {
+    for (const w of words) {
+      if (n.includes(w)) return note;
+    }
+  }
+  return null;
 }
 
 // ============================================================================
@@ -377,8 +435,7 @@ function updateSampleTable() {
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td class="name-cell"><input value="${s.name}" onchange="samples[${i}].name=this.value"></td>
-      <td><input type="number" min="0" max="127" value="${s.midiNote}" style="width:56px"
-           onchange="samples[${i}].midiNote=parseInt(this.value)"></td>
+      <td>${noteSelectHtml(i, s.midiNote)}</td>
       <td><input type="number" min="0" max="127" value="${s.volume}" style="width:56px"
            onchange="samples[${i}].volume=parseInt(this.value)"></td>
       <td>${dur}</td>
@@ -421,7 +478,7 @@ async function handleFileInput(fileList) {
     try {
       const { data, rate } = await fileToInt16(f, targetRate);
       const name = f.name.replace(/\.[^.]+$/, '').substring(0, 23);
-      const midiNote = 36 + samples.length; // auto-assign sequentially
+      const midiNote = guessNoteFromFilename(f.name) ?? (36 + samples.length);
       samples.push({ file: f, name, midiNote, volume: 127, int16Data: data, rate });
     } catch(e) {
       setStatus(`Error loading ${f.name}: ${e.message}`, true);
@@ -478,7 +535,18 @@ async function flashToDevice() {
   const slot    = parseInt(document.getElementById('bank-slot').value);
   const addr    = bankXipAddr(slot, flashMB);
 
-  setStatus('Requesting picoboot device (put device in BOOTSEL mode first)…');
+  // Reboot to BOOTSEL mode first — via MIDI if connected, otherwise instruct manually.
+  if (midiOutput) {
+    setStatus('Sending reboot-to-flash command via MIDI…');
+    midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_REBOOT, 0xF7]);
+    setStatus('Waiting for device to enter flash mode (2.5 s)…');
+    await new Promise(r => setTimeout(r, 2500));
+  } else {
+    setStatus('MIDI not connected — put device in flash mode first: hold BOOTSEL then press RESET (or use Config tab → Reboot to Flash Mode).');
+    await new Promise(r => setTimeout(r, 2000)); // give user time to read
+  }
+
+  setStatus('Select the Compulidian / RP2040 device in the popup…');
   let pico;
   try { pico = await Picoboot.requestDevice(); }
   catch(e) { setStatus('Device not found: ' + e.message, true); return; }
@@ -519,25 +587,54 @@ async function readFromDevice() {
   const slot    = parseInt(document.getElementById('bank-slot').value);
   const addr    = bankXipAddr(slot, flashMB);
 
-  setStatus('Requesting picoboot device…');
+  // Same reboot flow as flashToDevice
+  if (midiOutput) {
+    setStatus('Sending reboot-to-flash command via MIDI…');
+    midiOutput.send([0xF0, SYSEX_MFR_ID, SYSEX_DEVICE_ID, SYSEX_CMD_REBOOT, 0xF7]);
+    setStatus('Waiting for device to enter flash mode (2.5 s)…');
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
+  setStatus('Select the Compulidian / RP2040 device in the popup…');
   let pico;
   try { pico = await Picoboot.requestDevice(); }
   catch(e) { setStatus('Device not found: ' + e.message, true); return; }
 
-  setStatus(`Reading bank header from slot ${slot}…`);
   try {
-    const rawHeader = await pico.flashRead(addr, BANK_HEADER_SIZE);
-    const dv = new DataView(rawHeader.buffer);
-    const magic = dv.getUint32(0, true);
-    if (magic !== BANK_MAGIC) {
-      setStatus(`Slot ${slot} is empty (no valid bank header).`); return;
+    // Read header first to find out total PCM size
+    setStatus(`Reading bank header from slot ${slot}…`);
+    const rawHdr = new Uint8Array(await pico.flashRead(addr, BANK_HEADER_SIZE));
+    const dv     = new DataView(rawHdr.buffer);
+    if (dv.getUint32(0, true) !== BANK_MAGIC) {
+      setStatus(`Slot ${slot} is empty (magic 0x${dv.getUint32(0,true).toString(16)}).`); return;
     }
     const numSamples = dv.getUint32(8, true);
-    const bankName   = readCString(rawHeader, 16, 32);
-    setStatus(`Found bank "${bankName}" with ${numSamples} samples in slot ${slot}.`, false, true);
-    document.getElementById('bank-name').value = bankName;
+    // Calculate total PCM bytes from the last entry
+    let pcmBytes = 0;
+    for (let i = 0; i < numSamples && i < MAX_SAMPLES; i++) {
+      const eo  = 48 + i * BANK_ENTRY_SIZE;
+      const off = dv.getUint32(eo, true);
+      const n   = dv.getUint32(eo + 4, true);
+      pcmBytes  = Math.max(pcmBytes, off + n * 2);
+    }
+    // Read PCM data in chunks (picoboot reads up to ~64 KB at a time reliably)
+    setStatus(`Reading ${numSamples} samples (${(pcmBytes/1024).toFixed(0)} KB PCM)…`);
+    const pcmRaw  = new Uint8Array(pcmBytes);
+    const CHUNK   = 0x8000; // 32 KB
+    for (let off = 0; off < pcmBytes; off += CHUNK) {
+      const read = Math.min(CHUNK, pcmBytes - off);
+      showProgress(off / pcmBytes);
+      const chunk = new Uint8Array(await pico.flashRead(addr + BANK_HEADER_SIZE + off, read));
+      pcmRaw.set(chunk, off);
+    }
+    hideProgress();
+
+    // Assemble header + PCM and reuse the UF2-bank parser
+    const full = new Uint8Array(BANK_HEADER_SIZE + pcmBytes);
+    full.set(rawHdr, 0); full.set(pcmRaw, BANK_HEADER_SIZE);
+    await parseBankBinary(full, addr);
   } catch(e) {
-    setStatus('Read failed: ' + e.message, true);
+    hideProgress(); setStatus('Read failed: ' + e.message, true);
   }
 }
 window.readFromDevice = readFromDevice;
@@ -553,6 +650,90 @@ async function rebootToBootloader() {
   }
 }
 window.rebootToBootloader = rebootToBootloader;
+
+// ============================================================================
+// UF2 import  — load an existing bank .uf2, populate the sample table
+// ============================================================================
+function handleUF2Input(fileList) {
+  if (!fileList || fileList.length === 0) return;
+  loadUF2Bank(fileList[0]);
+}
+window.handleUF2Input = handleUF2Input;
+
+async function loadUF2Bank(file) {
+  setStatus(`Parsing ${file.name}…`);
+  try {
+    const buf   = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+
+    // Collect UF2 pages: address → Uint8Array(256)
+    const pages = new Map();
+    for (let off = 0; off + 512 <= bytes.length; off += 512) {
+      const dv = new DataView(buf, off, 512);
+      if (dv.getUint32(0, true) !== 0x0A324655) continue;
+      if (dv.getUint32(4, true) !== 0x9E5D5157) continue;
+      if (dv.getUint32(508, true) !== 0x0AB16F30) continue;
+      const addr     = dv.getUint32(12, true);
+      const dataSize = dv.getUint32(16, true);
+      pages.set(addr, new Uint8Array(buf, off + 32, dataSize));
+    }
+    if (pages.size === 0) { setStatus('No valid UF2 blocks found', true); return; }
+
+    // Find contiguous range and assemble
+    const addrs   = Array.from(pages.keys()).sort((a, b) => a - b);
+    const baseAddr = addrs[0];
+    const endAddr  = addrs[addrs.length - 1] + 256;
+    const binary   = new Uint8Array(endAddr - baseAddr);
+    binary.fill(0);
+    for (const [addr, data] of pages) binary.set(data, addr - baseAddr);
+
+    // Validate bank header
+    const dv = new DataView(binary.buffer);
+    const magic = dv.getUint32(0, true);
+    if (magic !== BANK_MAGIC) {
+      setStatus(`Not a Compulidian bank UF2 (magic 0x${magic.toString(16).padStart(8,'0')}, want 0x${BANK_MAGIC.toString(16)})`, true);
+      return;
+    }
+    const numSamples = dv.getUint32(8, true);
+    const dec        = new TextDecoder();
+    const bankName   = dec.decode(binary.slice(16, 48)).replace(/\0/g, '').trim();
+
+    // Auto-select slot / flash-size to match the UF2 target address
+    const bankOffset = baseAddr - XIP_BASE - FLASH_BANKS_OFFSET;
+    if (bankOffset >= 0 && FLASH_BANK_SIZE_16MB > 0) {
+      const slot = Math.round(bankOffset / FLASH_BANK_SIZE_16MB) + 1;
+      if (slot >= 1 && slot <= 4) {
+        document.getElementById('flash-size').value = '16';
+        updateSlotOptions();
+        document.getElementById('bank-slot').value = String(slot);
+      }
+    }
+    document.getElementById('bank-name').value = bankName || file.name.replace(/\.uf2$/i,'');
+
+    // Parse entries and extract PCM
+    samples = [];
+    for (let i = 0; i < numSamples && i < MAX_SAMPLES; i++) {
+      const eo        = 48 + i * BANK_ENTRY_SIZE;
+      const pcmOff    = dv.getUint32(eo,     true);
+      const numS      = dv.getUint32(eo + 4, true);
+      const sRate     = dv.getUint32(eo + 8, true);
+      const midiNote  = dv.getUint8(eo + 13);
+      const volume    = dv.getUint8(eo + 14);
+      const entryName = dec.decode(binary.slice(eo + 16, eo + 40)).replace(/\0/g, '').trim();
+      const absOff    = BANK_HEADER_SIZE + pcmOff;
+      // Copy the int16 data (slice so it has its own ArrayBuffer)
+      const pcmSlice  = binary.slice(absOff, absOff + numS * 2);
+      const int16Data = new Int16Array(pcmSlice.buffer);
+      samples.push({ name: entryName || `Sample ${i+1}`, midiNote, volume, rate: sRate, int16Data });
+    }
+
+    setStatus(`\u2713 Loaded "${bankName}" \u2014 ${numSamples} sample(s) from 0x${baseAddr.toString(16).toUpperCase()}`, false, true);
+    updateSampleTable();
+  } catch(e) {
+    setStatus('UF2 parse error: ' + e.message, true);
+  }
+}
+window.loadUF2Bank = loadUF2Bank;
 
 // ============================================================================
 // Helpers
@@ -632,6 +813,7 @@ async function midiConnect() {
   for (const out of midiAccess.outputs.values()) {
     if (out.name.toLowerCase().includes('compulidian')) { midiOutput = out; break; }
   }
+  console.log('MIDI inputs: ', Array.from(midiAccess.inputs.values()).map(i => i.name));
   for (const inp of midiAccess.inputs.values()) {
     if (inp.name.toLowerCase().includes('compulidian')) {
       midiInput = inp;
@@ -661,12 +843,13 @@ window.midiConnect = midiConnect;
 
 function onMidiMessage(ev) {
   const data = ev.data;
+  console.log('MIDI IN:', data);
   if (data[0] !== 0xF0 || data[data.length - 1] !== 0xF7) return;
   // Strip F0 and F7
   const payload = data.slice(1, data.length - 1);
   if (payload[0] !== SYSEX_MFR_ID || payload[1] !== SYSEX_DEVICE_ID) return;
   if (payload[2] === SYSEX_CMD_DATA) {
-    currentCfg = payload.slice(3); // active_bank, num_valid_banks, ...
+    currentCfg = payload.slice(3); // active_bank, num_valid_banks, settings..., [bank names]
     applyCfgToUI(currentCfg);
     document.getElementById('config-status').textContent = '✓ Config loaded from device.';
   }
@@ -733,7 +916,8 @@ function renderKnobs() {
 }
 
 function applyCfgToUI(d) {
-  // d = [active_bank, num_valid_banks, out0.type, out0.ch, out0.note, out1.type, ..., cv0, cv1, k0, k1, k2]
+  // d = [active_bank, num_valid_banks, out0.type, out0.ch, out0.note, ..., cv0, cv1, k0, k1, k2,
+  //      bankName1[32], bankName2[32], bankName3[32], bankName4[32]]
   if (d.length < 19) return;
   document.getElementById('cfg-active-bank').value = d[0];
   document.getElementById('cfg-banks-available').textContent =
@@ -747,6 +931,17 @@ function applyCfgToUI(d) {
   document.getElementById('knob-role-0').value = d[16];
   document.getElementById('knob-role-1').value = d[17];
   document.getElementById('knob-role-2').value = d[18];
+  // Bank names appended after settings data (32 bytes each, ASCII)
+  const nameBase = 19;
+  const dec = new TextDecoder();
+  for (let slot = 1; slot <= 4; slot++) {
+    const start = nameBase + (slot - 1) * 32;
+    if (d.length < start + 1) break;
+    const slice = d.slice(start, start + 32);
+    const name  = dec.decode(Uint8Array.from(slice)).replace(/\0/g, '').trim();
+    const opt   = document.querySelector(`#cfg-active-bank option[value="${slot}"]`);
+    if (opt) opt.textContent = name ? `${slot} \u2014 ${name}` : `${slot} \u2014 Flash bank ${slot}`;
+  }
 }
 
 function buildCfgFromUI() {
