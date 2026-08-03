@@ -22,14 +22,23 @@ struct BankEntryHeader {
     uint32_t num_samples;  // number of PCM frames (int16_t values for 16-bit)
     uint32_t sample_rate;  // e.g. 44100, 22050, 24000
     uint8_t  bit_depth;    // bits per sample (currently only 16 is supported)
-    uint8_t  midi_note;    // MIDI note number that triggers this sample
+    uint8_t  midi_note;    // MIDI note number that triggers this sample - must
+                           // match the active output processor's slot note at
+                           // this same entry index, or it will never trigger
     uint8_t  volume;       // default playback volume 0-127
-    uint8_t  flags;        // reserved, must be 0
-    char     name[24];     // null-terminated sample name (max 23 chars + NUL)
+    uint8_t  flags;        // bitfield, see BANK_ENTRY_FLAG_* below
+    char     name[24];     // null-terminated original sample filename (max 23
+                           // chars + NUL) - a convenience label only, not the
+                           // slot's identity (that comes from the device's
+                           // output processor, see SYSEX_TYPE_GET_SLOTS_REQ)
 };
 // sizeof(BankEntryHeader) == 40
 
 #define BANK_ENTRY_SIZE 40   // keep in sync with the struct above
+
+// When set on an empty entry (num_samples == 0), the device restores that
+// specific voice's compiled-in sample instead of leaving it silent.
+#define BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED 0x01
 
 // Compile-time size guard (C++ only).
 #ifdef __cplusplus

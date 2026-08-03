@@ -187,12 +187,65 @@ bool BankManager::load_flash_bank_(int slot) {
 
     for (uint32_t i = 0; i < voices_to_load; ++i) {
         const BankEntryHeader &e = hdr->entries[i];
-        if (e.num_samples == 0) continue; // skip empty / placeholder entries
+        int si = voice[i].sample; // voice i plays sample slot si
+
+        // Raw dump of every entry as read from flash - temporary diagnostic
+        // to help pin down corrupt bank data vs. a genuine playback bug.
+        if (Serial) Serial.printf("BankMgr: slot %d entry %u raw: offset=%u num_samples=%u rate=%u bits=%u note=%u vol=%u flags=0x%02X name='%.*s'\n",
+            slot, i, e.offset, e.num_samples, e.sample_rate, e.bit_depth, e.midi_note, e.volume, e.flags, 23, e.name);
+
+        // An entry is treated as unusable (and falls back the same way an
+        // empty slot would) if it fails basic sanity checks — this guards
+        // against corrupt/truncated bank data (e.g. an interrupted flash
+        // write) crashing the audio ISR instead of just staying silent.
+        bool usable = e.num_samples != 0;
+        if (usable && e.bit_depth != 16) {
+            if (Serial) Serial.printf("BankMgr: slot %d entry %u has unsupported bit_depth %u - skipping\n",
+                slot, i, e.bit_depth);
+            usable = false;
+        }
+        if (usable) {
+            uint64_t pcm_region_size = (uint64_t)FLASH_BANK_SIZE - BANK_HEADER_SIZE;
+            uint64_t entry_end = (uint64_t)e.offset + (uint64_t)e.num_samples * 2u;
+            if (entry_end > pcm_region_size) {
+                if (Serial) Serial.printf("BankMgr: slot %d entry %u out of bounds (offset=%u num_samples=%u) - skipping\n",
+                    slot, i, e.offset, e.num_samples);
+                usable = false;
+            }
+        }
+        // Guard against the sampleindex sentinel calculation overflowing
+        // uint32_t below (num_samples << 12) for implausibly long samples.
+        if (usable && e.num_samples > (0xFFFFFFFFu >> 12)) {
+            if (Serial) Serial.printf("BankMgr: slot %d entry %u num_samples %u too large (sampleindex would overflow) - skipping\n",
+                slot, i, e.num_samples);
+            usable = false;
+        }
+
+        if (!usable) {
+            // Unusable/empty slot: fall back to this voice's compiled-in sample if
+            // requested, otherwise leave it silent.
+            if ((e.flags & BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED) && i < compiled_num_voices_) {
+                sample_data[si] = compiled_cache_[i];
+                sample[si].MIDINOTE    = compiled_midinote_[i];
+                sample[si].play_volume = compiled_volume_[i];
+                voice[i].sampleindex = compiled_cache_[i]
+                    ? (uint32_t)compiled_cache_[i]->size() << 12
+                    : 0xFFFFFFFFu;
+            } else {
+                sample_data[si] = nullptr;
+                // Invalidate the note too - otherwise get_voice_number_for_note()
+                // can still match this voice against a stale MIDINOTE left over
+                // from the compiled-in bank/a previous load, and route a real
+                // trigger into a null sample_data pointer.
+                sample[si].MIDINOTE = 0xFF;
+                voice[i].sampleindex = 0xFFFFFFFFu;
+            }
+            continue;
+        }
 
         // Initialise pool entry in-place (no heap allocation).
         flash_pool_[flash_pool_count_].init(data_base + e.offset, e.num_samples);
 
-        int si = voice[i].sample; // voice i plays sample slot si
         sample_data[si] = &flash_pool_[flash_pool_count_];
 
         // Match this bank's own note/volume/name assignments, not the
@@ -209,9 +262,11 @@ bool BankManager::load_flash_bank_(int slot) {
         ++flash_pool_count_;
     }
 
-    // Silence any voices beyond what the bank provides.
+    // Silence any voices beyond what the bank provides, and invalidate their
+    // notes so a stale MIDINOTE can't route a trigger to leftover/null sample_data.
     for (int i = (int)voices_to_load; i < NUM_VOICES; ++i) {
         voice[i].sampleindex = 0xFFFFFFFFu;
+        sample[voice[i].sample].MIDINOTE = 0xFF;
     }
 
     return (flash_pool_count_ > 0);

@@ -59,7 +59,8 @@ public:
                 
                     tracksample=voice[track].sample; // precompute for a little more speed below
                     index=voice[track].sampleindex>>12; // get the integer part of the sample increment
-                    if (index < sample_data[tracksample]->size()) { // if sample is playing
+                    // sample_data[tracksample] can be null for an empty/unusable bank slot - guard against it.
+                    if (sample_data[tracksample] && index < sample_data[tracksample]->size()) { // if sample is playing
                         //Serial.printf("track %i is playing sample %i\n", track, tracksample); Serial.flush();
                         if (interpolate_enabled) {  // do interpolation   
                             samp0 = sample_data[tracksample]->get_sample(index); // get the first sample to interpolate

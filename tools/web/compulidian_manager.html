@@ -73,95 +73,134 @@
   ES module imports will silently fail on <code>file://</code>.
   Run <code>python3 -m http.server 8080</code> in the <code>tools/web/</code> folder, or use any local HTTP server.
 </div>
-  <button class="active" onclick="switchTab('upload', this)">Sample Banks</button>
-  <button onclick="switchTab('config', this)">Configuration</button>
+
+<div id="connection-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border)">
+  <button class="btn primary" onclick="midiConnect()">
+    <span class="midi-status" id="midi-dot"></span> Connect via Web MIDI
+  </button>
+  <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
+</div>
+
+<nav>
+  <button class="active" onclick="switchTab('bank', this)">Bank Management</button>
+  <button onclick="switchTab('io', this)">Output/Input Mapping</button>
+  <button onclick="switchTab('other', this)">Other Settings</button>
 </nav>
 
 <!-- =====================================================================
-     TAB: SAMPLE BANKS
+     TAB: BANK MANAGEMENT
      ===================================================================== -->
-<div id="tab-upload" class="tab active">
+<div id="tab-bank" class="tab active">
 
-  <div id="dropzone" onclick="document.getElementById('fileInput').click()"
-       ondragover="event.preventDefault();this.classList.add('over')"
-       ondragleave="this.classList.remove('over')"
-       ondrop="handleDrop(event)">
-    <input type="file" id="fileInput" multiple accept="audio/*" onchange="handleFileInput(this.files)">
-    <input type="file" id="uf2Input" accept=".uf2" style="display:none" onchange="handleUF2Input(this.files)">
-    <p>Drop WAV / MP3 / OGG / FLAC files here, or click to browse</p>
-    <p style="font-size:.8rem;margin-top:.4rem">Files are converted to 16-bit PCM mono in the browser — or <a href="#" onclick="document.getElementById('uf2Input').click();return false">load an existing .uf2 bank</a></p>
-  </div>
+  <p id="slots-gate" style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">
+    Connect via Web MIDI above to load this device's sample slots — slot names and
+    MIDI notes come from the device's active output configuration, not from this tool.
+  </p>
 
-  <table id="sample-table">
-    <thead><tr>
-      <th>#</th>
-      <th>Name</th>
-      <th>MIDI Note</th>
-      <th>Volume</th>
-      <th>Duration</th>
-      <th>Size</th>
-      <th></th>
-    </tr></thead>
-    <tbody id="sample-list"></tbody>
-  </table>
-  <p id="no-samples" style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">No samples loaded yet.</p>
+  <div id="bank-editor" style="display:none">
 
-  <div class="row">
-    <div class="col">
-      <label>Resample to</label>
-      <select id="target-rate">
-        <option value="">Keep original</option>
-        <option value="44100">44100 Hz</option>
-        <option value="22050" selected>22050 Hz</option>
-        <option value="24000">24000 Hz</option>
-      </select>
+    <div class="row">
+      <div class="col">
+        <label>Editing bank slot</label>
+        <select id="bank-slot" onchange="updateBudget()"></select>
+      </div>
+      <div class="col">
+        <label>Flash size</label>
+        <select id="flash-size" onchange="updateSlotOptions()">
+          <option value="2">2 MB (standard Pico — no user banks)</option>
+          <option value="16" selected>16 MB (extended flash)</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>Bank name</label>
+        <input type="text" id="bank-name" value="My Kit" maxlength="31" style="width:140px">
+      </div>
+      <div class="col">
+        <label>Resample new samples to</label>
+        <select id="target-rate">
+          <option value="">Keep original</option>
+          <option value="44100">44100 Hz</option>
+          <option value="22050" selected>22050 Hz</option>
+          <option value="24000">24000 Hz</option>
+        </select>
+      </div>
     </div>
-    <div class="col">
-      <label>Flash size</label>
-      <select id="flash-size" onchange="updateSlotOptions()">
-        <option value="2">2 MB (standard Pico — no user banks)</option>
-        <option value="16" selected>16 MB (extended flash)</option>
-      </select>
+
+    <table id="slot-table">
+      <thead><tr>
+        <th>#</th>
+        <th>Slot</th>
+        <th>Note</th>
+        <th>Sample file</th>
+        <th>Volume</th>
+        <th>Duration</th>
+        <th>Size</th>
+        <th>Fallback</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="slot-list"></tbody>
+    </table>
+
+    <div id="dropzone" onclick="document.getElementById('fileInput').click()"
+         ondragover="event.preventDefault();this.classList.add('over')"
+         ondragleave="this.classList.remove('over')"
+         ondrop="handleDrop(event)">
+      <input type="file" id="fileInput" multiple accept="audio/*" style="display:none" onchange="handleFileInput(this.files)">
+      <input type="file" id="uf2Input" accept=".uf2" style="display:none" onchange="handleUF2Input(this.files)">
+      <p>Drop WAV / MP3 / OGG / FLAC files here to bulk-add (auto-matched to slots by filename), or click to browse</p>
+      <p style="font-size:.8rem;margin-top:.4rem">Prefer precise placement? Use each slot row's Replace button instead — or <a href="#" onclick="document.getElementById('uf2Input').click();return false">load an existing .uf2 bank</a></p>
     </div>
-    <div class="col">
-      <label>Bank slot</label>
-      <select id="bank-slot"></select>
+
+    <input type="file" id="replaceInput" accept="audio/*" style="display:none" onchange="handleReplaceInput(this.files)">
+
+    <div class="row">
+      <button class="btn primary" onclick="flashToDevice()">⚡ Flash to Device</button>
+      <button class="btn" onclick="downloadUF2()">⬇ Download UF2</button>
+      <button class="btn" onclick="readFromDevice()">⬆ Pull Sample Data from Device</button>
+      <button class="btn danger" onclick="rebootToBootloader()">↺ Reboot to Flash Mode</button>
     </div>
-    <div class="col">
-      <label>Bank name</label>
-      <input type="text" id="bank-name" value="My Kit" maxlength="31" style="width:140px">
+
+
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+    <div id="status"></div>
+
+    <div class="section-title">Flash Memory Budget</div>
+    <div id="budget-bar-wrap" style="background:var(--surface);border-radius:4px;height:16px;position:relative;overflow:hidden">
+      <div id="budget-bar" style="background:var(--accent);height:100%;width:0;transition:.2s"></div>
+      <span id="budget-label" style="position:absolute;right:8px;top:0;line-height:16px;font-size:.75rem;color:#000"></span>
     </div>
-  </div>
 
-  <div class="row">
-    <button class="btn primary" onclick="flashToDevice()">⚡ Flash to Device</button>
-    <button class="btn" onclick="downloadUF2()">⬇ Download UF2</button>
-    <button class="btn" onclick="readFromDevice()">⬆ Read from Device</button>
-    <button class="btn danger" onclick="rebootToBootloader()">↺ Reboot to Flash Mode</button>
-  </div>
+  </div><!-- /bank-editor -->
 
-  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-  <div id="status"></div>
-
-  <div class="section-title">Flash Memory Budget</div>
-  <div id="budget-bar-wrap" style="background:var(--surface);border-radius:4px;height:16px;position:relative;overflow:hidden">
-    <div id="budget-bar" style="background:var(--accent);height:100%;width:0;transition:.2s"></div>
-    <span id="budget-label" style="position:absolute;right:8px;top:0;line-height:16px;font-size:.75rem;color:#000"></span>
-  </div>
-
-</div><!-- /tab-upload -->
+</div><!-- /tab-bank -->
 
 <!-- =====================================================================
-     TAB: CONFIGURATION
+     TAB: OUTPUT/INPUT MAPPING
      ===================================================================== -->
-<div id="tab-config" class="tab">
+<div id="tab-io" class="tab">
 
-  <div class="row" style="margin-bottom:1.25rem">
-    <button class="btn primary" onclick="midiConnect()">
-      <span class="midi-status" id="midi-dot"></span> Connect via Web MIDI
-    </button>
-    <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
+  <div class="section-title">Output Jack Configuration</div>
+  <div class="grid4" id="cfg-outputs">
+    <!-- filled by renderOutputs() -->
   </div>
+
+  <div class="section-title">CV Input Roles</div>
+  <div class="grid2" id="cfg-cv-inputs">
+    <!-- filled by renderCVInputs() -->
+  </div>
+
+  <div class="row" style="margin-top:1.25rem">
+    <button class="btn primary" onclick="saveConfig()">💾 Save to Device</button>
+    <button class="btn" onclick="readConfig()">↺ Read from Device</button>
+  </div>
+  <div class="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
+
+</div><!-- /tab-io -->
+
+<!-- =====================================================================
+     TAB: OTHER SETTINGS
+     ===================================================================== -->
+<div id="tab-other" class="tab">
 
   <div class="section-title">Active Sample Bank</div>
   <div class="row">
@@ -180,16 +219,6 @@
     </div>
   </div>
 
-  <div class="section-title">Output Jack Configuration</div>
-  <div class="grid4" id="cfg-outputs">
-    <!-- filled by renderOutputs() -->
-  </div>
-
-  <div class="section-title">CV Input Roles</div>
-  <div class="grid2" id="cfg-cv-inputs">
-    <!-- filled by renderCVInputs() -->
-  </div>
-
   <div class="section-title">Knob Roles</div>
   <div class="grid4" id="cfg-knobs" style="grid-template-columns:repeat(3,1fr)">
     <!-- filled by renderKnobs() -->
@@ -199,14 +228,15 @@
     <button class="btn primary" onclick="saveConfig()">💾 Save to Device</button>
     <button class="btn" onclick="readConfig()">↺ Read from Device</button>
   </div>
-  <div id="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
+  <div class="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
+
   <div class="row" style="margin-top:.5rem">
     <button class="btn" onclick="clearMidiLog()">Clear MIDI Log</button>
     <span id="midi-runtime-tag" style="font-size:.75rem;color:var(--muted)"></span>
   </div>
   <pre id="midi-debug-log" style="margin-top:.5rem;max-height:180px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;color:var(--muted);white-space:pre-wrap"></pre>
 
-</div><!-- /tab-config -->
+</div><!-- /tab-other -->
 
 <script type="module">
 // ============================================================================
@@ -240,11 +270,10 @@ const GM_PERC = {
   80:'Mute Triangle',81:'Open Triangle',
 };
 
-function noteSelectHtml(idx, val) {
-  const opts = Object.entries(GM_PERC).map(([n, name]) =>
-    `<option value="${n}"${parseInt(n)===val?' selected':''}>${n} \u2014 ${name}</option>`
-  ).join('');
-  return `<select onchange="setSampleField(${idx}, 'midiNote', parseInt(this.value))" style="font-size:.75rem;width:150px">${opts}</select>`;
+function noteLabel(note, channel) {
+  if (note == null || note < 0) return '—';
+  const gm = GM_PERC[note];
+  return gm ? `${note} (${gm}, ch ${channel})` : `${note} (ch ${channel})`;
 }
 
 // Heuristic: map filename keywords to GM note numbers.
@@ -289,6 +318,7 @@ const BANK_VERSION      = 1;
 const BANK_HEADER_SIZE  = 4096;
 const MAX_SAMPLES       = 64;
 const BANK_ENTRY_SIZE   = 40;
+const BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED = 0x01;
 
 // ============================================================================
 // UF2
@@ -448,84 +478,200 @@ async function fileToInt16(file, targetRate) {
 // ============================================================================
 // Bank binary builder
 // ============================================================================
-function buildBankBinary(bankName, entries) {
-  // entries: [{ name, midiNote, volume, rate, int16Data }]
+// slotDescs: [{ label, note, channel }] from the device (SYSEX_TYPE_SLOTS_INFO_RESP)
+// slotData:  [{ originalFilename, volume, rate, int16Data, cleared, fallbackToBuiltin }]
+// The MIDI note written per entry always comes from the device's slot
+// descriptor, never from user input - it's the only note that will ever
+// actually trigger that voice (see BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED).
+function buildBankBinary(bankName, slotDescs, slotData) {
   const header = new ArrayBuffer(BANK_HEADER_SIZE);
   const hv = new DataView(header);
   const enc = new TextEncoder();
 
   hv.setUint32(0, BANK_MAGIC,          true);
   hv.setUint32(4, BANK_VERSION,        true);
-  hv.setUint32(8, entries.length,      true);
+  hv.setUint32(8, slotDescs.length,    true);
   // reserved[4] at 12 = 0
   const nameBytes = enc.encode(bankName.substring(0, 31));
   new Uint8Array(header, 16, 32).set(nameBytes);
 
   let byteOffset = 0;
-  for (let i = 0; i < entries.length; i++) {
-    const e  = entries[i];
+  for (let i = 0; i < slotDescs.length; i++) {
+    const s  = slotData[i] || {};
     const eo = 48 + i * BANK_ENTRY_SIZE;
-    hv.setUint32(eo,      byteOffset,        true);
-    hv.setUint32(eo + 4,  e.int16Data.length, true);
-    hv.setUint32(eo + 8,  e.rate,            true);
-    hv.setUint8 (eo + 12, 16);               // bit_depth
-    hv.setUint8 (eo + 13, e.midiNote);
-    hv.setUint8 (eo + 14, e.volume);
-    hv.setUint8 (eo + 15, 0);               // flags
-    const nb = enc.encode(e.name.substring(0, 23));
+    const note = Math.max(0, slotDescs[i].note || 0);
+
+    if (!s.int16Data) {
+      // Empty slot: everything zero except the note (always recorded) and
+      // the fallback-to-compiled flag if requested.
+      hv.setUint8(eo + 13, note);
+      hv.setUint8(eo + 15, s.fallbackToBuiltin ? BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED : 0);
+      continue;
+    }
+
+    hv.setUint32(eo,      byteOffset,          true);
+    hv.setUint32(eo + 4,  s.int16Data.length,  true);
+    hv.setUint32(eo + 8,  s.rate,              true);
+    hv.setUint8 (eo + 12, 16);                 // bit_depth
+    hv.setUint8 (eo + 13, note);
+    hv.setUint8 (eo + 14, s.volume);
+    hv.setUint8 (eo + 15, s.fallbackToBuiltin ? BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED : 0);
+    const nb = enc.encode((s.originalFilename || '').substring(0, 23));
     new Uint8Array(header, eo + 16, 24).set(nb);
-    byteOffset += e.int16Data.byteLength;
+    byteOffset += s.int16Data.byteLength;
   }
 
   // Concatenate header + PCM
   const result = new Uint8Array(BANK_HEADER_SIZE + byteOffset);
   result.set(new Uint8Array(header), 0);
   let off = BANK_HEADER_SIZE;
-  for (const e of entries) {
-    result.set(new Uint8Array(e.int16Data.buffer), off);
-    off += e.int16Data.byteLength;
+  for (const s of slotData) {
+    if (!s || !s.int16Data) continue;
+    result.set(new Uint8Array(s.int16Data.buffer), off);
+    off += s.int16Data.byteLength;
   }
   return result;
 }
 
 // ============================================================================
-// Sample list state
+// Slot state
 // ============================================================================
-let samples = [];  // [{ file, name, midiNote, volume, int16Data, rate }]
+// slots: device-reported descriptors, fetched via SYSEX_TYPE_GET_SLOTS_REQ.
+// Positional and authoritative - never invented/edited by this tool.
+let slots = [];  // [{ label, note, channel }]
+// bankSlots: the bank being edited, same length/order as slots.
+let bankSlots = [];  // [{ originalFilename, volume, rate, int16Data, cleared, fallbackToBuiltin }]
+let pendingReplaceIndex = -1;
 
-function updateSampleTable() {
-  const tbody = document.getElementById('sample-list');
-  const noMsg = document.getElementById('no-samples');
+function emptyBankSlot() {
+  return { originalFilename: null, volume: 127, rate: null, int16Data: null, cleared: true, fallbackToBuiltin: false };
+}
+
+function resetBankSlotsForCurrentSlots() {
+  bankSlots = slots.map(() => emptyBankSlot());
+}
+
+function updateSlotsGateUI() {
+  const gate   = document.getElementById('slots-gate');
+  const editor = document.getElementById('bank-editor');
+  const have   = slots.length > 0;
+  gate.style.display   = have ? 'none' : 'block';
+  editor.style.display = have ? 'block' : 'none';
+}
+
+function updateSlotTable() {
+  const tbody = document.getElementById('slot-list');
   tbody.innerHTML = '';
-  noMsg.style.display = samples.length ? 'none' : 'block';
 
-  for (let i = 0; i < samples.length; i++) {
-    const s   = samples[i];
-    const dur = s.int16Data ? (s.int16Data.length / s.rate).toFixed(2) + 's' : '…';
-    const kb  = s.int16Data ? (s.int16Data.byteLength / 1024).toFixed(1) + ' KB' : '…';
-    const tr  = document.createElement('tr');
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    const s    = bankSlots[i] || emptyBankSlot();
+    const dur  = s.int16Data ? (s.int16Data.length / s.rate).toFixed(2) + 's' : '—';
+    const kb   = s.int16Data ? (s.int16Data.byteLength / 1024).toFixed(1) + ' KB' : '—';
+    const fileLabel = s.int16Data
+      ? (s.originalFilename || '(unnamed)')
+      : '<span style="color:var(--muted)">— empty —</span>';
+    const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td class="name-cell"><input value="${s.name}" onchange="setSampleField(${i}, 'name', this.value)"></td>
-      <td>${noteSelectHtml(i, s.midiNote)}</td>
+      <td><strong>${slot.label}</strong></td>
+      <td style="color:var(--muted);font-size:.8rem">${noteLabel(slot.note, slot.channel)}</td>
+      <td class="name-cell">${fileLabel}</td>
       <td><input type="number" min="0" max="127" value="${s.volume}" style="width:56px"
-           onchange="setSampleField(${i}, 'volume', parseInt(this.value))"></td>
+           onchange="setSlotField(${i}, 'volume', parseInt(this.value))"></td>
       <td>${dur}</td>
       <td>${kb}</td>
-      <td><button class="btn" style="padding:.2rem .6rem" onclick="removeSample(${i})">✕</button></td>`;
+      <td style="text-align:center">
+        <input type="checkbox" ${s.fallbackToBuiltin ? 'checked' : ''}
+           title="If this slot ends up empty, play the built-in sample instead of staying silent"
+           onchange="setSlotField(${i}, 'fallbackToBuiltin', this.checked)">
+      </td>
+      <td style="white-space:nowrap">
+        <button class="btn" style="padding:.2rem .5rem" title="Replace sample" onclick="replaceSlot(${i})">⇪</button>
+        <button class="btn" style="padding:.2rem .5rem" title="Clear slot" onclick="clearSlot(${i})">✕</button>
+        <button class="btn" style="padding:.2rem .5rem" title="Audition in browser" onclick="auditionSlotBrowser(${i})" ${s.int16Data ? '' : 'disabled'}>▶</button>
+        <button class="btn" style="padding:.2rem .5rem" title="Audition on device (active bank only)" onclick="auditionSlotDevice(${i})">🔊</button>
+      </td>`;
     tbody.appendChild(tr);
   }
   updateBudget();
 }
 
-function removeSample(i) { samples.splice(i, 1); updateSampleTable(); }
-function setSampleField(i, field, value) { samples[i][field] = value; }
+function setSlotField(i, field, value) {
+  if (!bankSlots[i]) bankSlots[i] = emptyBankSlot();
+  bankSlots[i][field] = value;
+  updateSlotTable();
+}
+
+function replaceSlot(i) {
+  pendingReplaceIndex = i;
+  document.getElementById('replaceInput').click();
+}
+window.replaceSlot = replaceSlot;
+
+function clearSlot(i) {
+  const fallback = bankSlots[i] ? bankSlots[i].fallbackToBuiltin : false;
+  bankSlots[i] = emptyBankSlot();
+  bankSlots[i].fallbackToBuiltin = fallback;
+  updateSlotTable();
+}
+window.clearSlot = clearSlot;
+
+async function handleReplaceInput(fileList) {
+  const i = pendingReplaceIndex;
+  pendingReplaceIndex = -1;
+  if (i < 0 || !fileList || fileList.length === 0) return;
+  const f = fileList[0];
+  const targetRate = parseInt(document.getElementById('target-rate').value) || null;
+  setStatus(`Loading ${f.name}…`);
+  try {
+    const { data, rate } = await fileToInt16(f, targetRate);
+    const fallback = bankSlots[i] ? bankSlots[i].fallbackToBuiltin : false;
+    bankSlots[i] = {
+      originalFilename: f.name.substring(0, 23),
+      volume: 127, rate, int16Data: data,
+      cleared: false, fallbackToBuiltin: fallback
+    };
+    setStatus('');
+  } catch(e) {
+    setStatus(`Error loading ${f.name}: ${e.message}`, true);
+  }
+  updateSlotTable();
+}
+window.handleReplaceInput = handleReplaceInput;
+
+let auditionAudioCtx = null;
+function auditionSlotBrowser(i) {
+  const s = bankSlots[i];
+  if (!s || !s.int16Data) return;
+  if (!auditionAudioCtx) auditionAudioCtx = new AudioContext();
+  const buf = auditionAudioCtx.createBuffer(1, s.int16Data.length, s.rate);
+  const ch = buf.getChannelData(0);
+  for (let n = 0; n < s.int16Data.length; n++) ch[n] = s.int16Data[n] / 32768;
+  const src = auditionAudioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(auditionAudioCtx.destination);
+  src.start(0);
+}
+window.auditionSlotBrowser = auditionSlotBrowser;
+
+function auditionSlotDevice(i) {
+  const slot = slots[i];
+  if (!slot || slot.note < 0) { setStatus('This slot has no MIDI note to trigger.', true); return; }
+  if (!midiOutput) { setStatus('Connect via Web MIDI to audition on the device.', true); return; }
+  try {
+    midiOutput.playNote(slot.note, { channels: slot.channel > 0 ? slot.channel : 10, rawAttack: 100, duration: 200 });
+  } catch(e) {
+    setStatus('Audition failed: ' + e.message, true);
+  }
+}
+window.auditionSlotDevice = auditionSlotDevice;
 
 function updateBudget() {
   const flashMB  = parseInt(document.getElementById('flash-size').value);
-  const slot     = parseInt(document.getElementById('bank-slot').value);
+  const slotSel  = parseInt(document.getElementById('bank-slot').value);
   const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
-  const used     = BANK_HEADER_SIZE + samples.reduce((s, e) => s + (e.int16Data ? e.int16Data.byteLength : 0), 0);
+  const used     = BANK_HEADER_SIZE + bankSlots.reduce((s, e) => s + (e && e.int16Data ? e.int16Data.byteLength : 0), 0);
   const pct      = Math.min(100, (used / bankSize) * 100);
   document.getElementById('budget-bar').style.width = pct + '%';
   document.getElementById('budget-label').textContent =
@@ -544,26 +690,42 @@ function handleDrop(ev) {
   handleFileInput(ev.dataTransfer.files);
 }
 
+// Bulk add: guess each file's target slot from its filename (matching the
+// device-reported note for that slot), falling back to the next empty slot.
 async function handleFileInput(fileList) {
+  if (slots.length === 0) { setStatus('Connect via Web MIDI first.', true); return; }
   const targetRate = parseInt(document.getElementById('target-rate').value) || null;
+  let skipped = 0;
+
   for (const f of fileList) {
     setStatus(`Loading ${f.name}…`);
     try {
       const { data, rate } = await fileToInt16(f, targetRate);
-      const name = f.name.replace(/\.[^.]+$/, '').substring(0, 23);
-      const midiNote = guessNoteFromFilename(f.name) ?? (36 + samples.length);
-      samples.push({ file: f, name, midiNote, volume: 127, int16Data: data, rate });
+      const guessedNote = guessNoteFromFilename(f.name);
+
+      let idx = -1;
+      if (guessedNote != null) {
+        idx = slots.findIndex((slot, n) => slot.note === guessedNote && (!bankSlots[n] || !bankSlots[n].int16Data));
+      }
+      if (idx === -1) {
+        idx = bankSlots.findIndex(s => !s || !s.int16Data);
+      }
+      if (idx === -1) { skipped++; continue; }
+
+      bankSlots[idx] = {
+        originalFilename: f.name.substring(0, 23),
+        volume: 127, rate, int16Data: data,
+        cleared: false, fallbackToBuiltin: bankSlots[idx] ? bankSlots[idx].fallbackToBuiltin : false
+      };
     } catch(e) {
       setStatus(`Error loading ${f.name}: ${e.message}`, true);
     }
   }
-  setStatus('');
-  updateSampleTable();
+  setStatus(skipped ? `${skipped} file(s) skipped — no empty slot left.` : '', skipped > 0);
+  updateSlotTable();
 }
 window.handleDrop = handleDrop;
 window.handleFileInput = handleFileInput;
-window.removeSample = removeSample;
-window.setSampleField = setSampleField;
 
 // ============================================================================
 // Flash slot options
@@ -589,12 +751,13 @@ updateSlotOptions();
 import { Picoboot } from './lib/picoflash/index.js';
 
 async function getReadyBinary() {
-  if (samples.length === 0) { setStatus('No samples loaded.', true); return null; }
+  if (slots.length === 0) { setStatus('Connect via Web MIDI first so slot notes are known.', true); return null; }
   setStatus('Building bank binary…');
   try {
     return buildBankBinary(
       document.getElementById('bank-name').value || 'My Kit',
-      samples
+      slots,
+      bankSlots
     );
   } catch(e) {
     setStatus('Build failed: ' + e.message, true);
@@ -616,7 +779,7 @@ async function flashToDevice() {
     setStatus('Waiting for device to enter flash mode (2.5 s)…');
     await new Promise(r => setTimeout(r, 2500));
   } else {
-    setStatus('MIDI not connected — put device in flash mode first: hold BOOTSEL then press RESET (or use Config tab → Reboot to Flash Mode).');
+    setStatus('MIDI not connected — put device in flash mode first: hold BOOTSEL then press RESET (or use the Reboot to Flash Mode button here).');
     await new Promise(r => setTimeout(r, 2000)); // give user time to read
   }
 
@@ -665,7 +828,7 @@ async function readFromDevice(forceFlashMode = false) {
   // Default path: runtime read over MIDI SysEx (no reboot to flash mode).
   if (!forceFlashMode) {
     if (!midiOutput) {
-      setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI on the Configuration tab first.', true);
+      setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI (top of page) first.', true);
       return;
     }
     try {
@@ -794,6 +957,10 @@ async function parseBankBinary(binary, baseAddr = null) {
     throw new Error(`Invalid sample count ${numSamples} (max ${MAX_SAMPLES})`);
   }
 
+  if (slots.length === 0) {
+    throw new Error('Connect via Web MIDI first so slot notes/names are known.');
+  }
+
   const dec      = new TextDecoder();
   const bankName = dec.decode(binary.slice(16, 48)).replace(/\0/g, '').trim();
 
@@ -814,8 +981,9 @@ async function parseBankBinary(binary, baseAddr = null) {
     document.getElementById('bank-name').value = bankName;
   }
 
-  const parsedSamples = [];
-  for (let i = 0; i < numSamples; i++) {
+  const loadCount = Math.min(numSamples, slots.length);
+  const parsed = slots.map(() => emptyBankSlot());
+  for (let i = 0; i < loadCount; i++) {
     const eo        = 48 + i * BANK_ENTRY_SIZE;
     const pcmOff    = dv.getUint32(eo, true);
     const numS      = dv.getUint32(eo + 4, true);
@@ -823,9 +991,17 @@ async function parseBankBinary(binary, baseAddr = null) {
     const bitDepth  = dv.getUint8(eo + 12);
     const midiNote  = dv.getUint8(eo + 13);
     const volume    = dv.getUint8(eo + 14);
+    const flags     = dv.getUint8(eo + 15);
     const entryName = dec.decode(binary.slice(eo + 16, eo + 40)).replace(/\0/g, '').trim();
-    const absOff    = BANK_HEADER_SIZE + pcmOff;
-    const absEnd    = absOff + numS * 2;
+
+    if (numS === 0) {
+      parsed[i] = emptyBankSlot();
+      parsed[i].fallbackToBuiltin = !!(flags & BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED);
+      continue;
+    }
+
+    const absOff = BANK_HEADER_SIZE + pcmOff;
+    const absEnd = absOff + numS * 2;
 
     if (bitDepth !== 16) {
       throw new Error(`Unsupported bit depth ${bitDepth} in sample ${i + 1}`);
@@ -833,26 +1009,29 @@ async function parseBankBinary(binary, baseAddr = null) {
     if (absEnd > binary.length) {
       throw new Error(`Sample ${i + 1} exceeds bank payload size`);
     }
+    if (midiNote !== slots[i].note) {
+      midiDebug(`bank entry ${i} note ${midiNote} does not match slot "${slots[i].label}" note ${slots[i].note}`);
+    }
 
     // Copy sample bytes to a standalone buffer before viewing as Int16.
     const pcmSlice  = binary.slice(absOff, absEnd);
     const int16Data = new Int16Array(pcmSlice.buffer);
-    parsedSamples.push({
-      name: entryName || `Sample ${i + 1}`,
-      midiNote,
-      volume,
-      rate: sRate,
-      int16Data,
-    });
+    parsed[i] = {
+      originalFilename: entryName || null,
+      volume, rate: sRate, int16Data,
+      cleared: false,
+      fallbackToBuiltin: !!(flags & BANK_ENTRY_FLAG_FALLBACK_TO_COMPILED),
+    };
   }
 
-  samples = parsedSamples;
-  updateSampleTable();
+  bankSlots = parsed;
+  updateSlotTable();
 
   const addrTag = typeof baseAddr === 'number'
     ? ` from 0x${baseAddr.toString(16).toUpperCase()}`
     : '';
-  setStatus(`✓ Loaded "${bankName || 'Bank'}" — ${parsedSamples.length} sample(s)${addrTag}`, false, true);
+  const loadedCount = parsed.filter(s => s.int16Data).length;
+  setStatus(`✓ Loaded "${bankName || 'Bank'}" — ${loadedCount} sample(s)${addrTag}`, false, true);
 }
 
 async function loadUF2Bank(file) {
@@ -928,7 +1107,7 @@ function switchTab(name, btn) {
 window.switchTab = switchTab;
 
 // ============================================================================
-// Config tab — Web MIDI transport
+// Config transport — Web MIDI
 // ============================================================================
 // Transport map (v2 SysEx):
 // - Browser sends GET/SET/REBOOT requests with a request ID.
@@ -952,10 +1131,12 @@ const SYSEX_TYPE_GET_CONFIG_REQ = 0x10;
 const SYSEX_TYPE_SET_CONFIG_REQ = 0x11;
 const SYSEX_TYPE_GET_BANK_INFO_REQ = 0x12;
 const SYSEX_TYPE_GET_BANK_CHUNK_REQ = 0x13;
+const SYSEX_TYPE_GET_SLOTS_REQ  = 0x14;
 const SYSEX_TYPE_REBOOT_REQ     = 0x20;
 const SYSEX_TYPE_CONFIG_RESP    = 0x30;
 const SYSEX_TYPE_BANK_INFO_RESP = 0x40;
 const SYSEX_TYPE_BANK_CHUNK_RESP = 0x41;
+const SYSEX_TYPE_SLOTS_INFO_RESP = 0x42;
 const SYSEX_TYPE_ACK            = 0x31;
 const SYSEX_TYPE_NACK           = 0x32;
 
@@ -1037,9 +1218,11 @@ function midiDot(on) {
 }
 
 function setConfigStatus(msg, isError = false, isOk = false) {
-  const el = document.getElementById('config-status');
-  el.textContent = msg;
-  el.style.color = isError ? 'var(--danger)' : (isOk ? 'var(--ok)' : 'var(--muted)');
+  const color = isError ? 'var(--danger)' : (isOk ? 'var(--ok)' : 'var(--muted)');
+  document.querySelectorAll('.config-status').forEach(el => {
+    el.textContent = msg;
+    el.style.color = color;
+  });
 }
 
 function matchesCompulidianName(device) {
@@ -1569,8 +1752,52 @@ async function midiConnect(isReconnectAttempt = false) {
   } catch (e) {
     setConfigStatus('Connected, but config read failed: ' + e.message, true, false);
   }
+
+  try {
+    await fetchDeviceSlots();
+    setStatus(`✓ Loaded ${slots.length} slot(s) from device.`, false, true);
+  } catch (e) {
+    setStatus('Failed to read device slots: ' + e.message, true);
+  }
 }
 window.midiConnect = midiConnect;
+
+// Fetches the active output processor's slots generically (name/note/channel
+// per position) - the web tool never hardcodes which MIDIOutputProcessor
+// subclass is compiled into the firmware.
+async function fetchDeviceSlots() {
+  if (!midiOutput) throw new Error('Not connected via MIDI');
+  const resp = await requestSysexResponse(
+    SYSEX_TYPE_GET_SLOTS_REQ,
+    [],
+    [SYSEX_TYPE_SLOTS_INFO_RESP]
+  );
+  const p = resp.payload || [];
+  if (p.length < 1) throw new Error('Empty slots response');
+
+  const count = p[0] & 0x7F;
+  const dec = new TextDecoder();
+  const parsedSlots = [];
+  let pos = 1;
+  for (let i = 0; i < count; i++) {
+    if (pos + 3 > p.length) throw new Error('Truncated slots response');
+    const note = p[pos] & 0x7F;
+    const channel = p[pos + 1] & 0x7F;
+    const labelLen = p[pos + 2] & 0x7F;
+    pos += 3;
+    if (pos + labelLen > p.length) throw new Error('Truncated slot label');
+    const label = dec.decode(Uint8Array.from(p.slice(pos, pos + labelLen))) || `Slot ${i + 1}`;
+    pos += labelLen;
+    parsedSlots.push({ note: note > 0x7E ? -1 : note, channel, label });
+  }
+
+  const sameLength = parsedSlots.length === slots.length;
+  slots = parsedSlots;
+  if (!sameLength) resetBankSlotsForCurrentSlots();
+  updateSlotsGateUI();
+  updateSlotTable();
+}
+
 
 async function readConfig() {
   if (!midiOutput) {

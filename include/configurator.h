@@ -6,6 +6,7 @@
 #include "audio/flash_layout.h"
 #include "audio/bank_manager.h"
 #include "workshop_output.h"
+#include "outputs/output_processor.h"
 
 // ---------------------------------------------------------------------------
 // SysEx protocol v2 (matches tools/web/compulidian_manager.html)
@@ -20,11 +21,13 @@
 #define SYSEX_TYPE_SET_CONFIG_REQ 0x11
 #define SYSEX_TYPE_GET_BANK_INFO_REQ 0x12
 #define SYSEX_TYPE_GET_BANK_CHUNK_REQ 0x13
+#define SYSEX_TYPE_GET_SLOTS_REQ  0x14
 #define SYSEX_TYPE_REBOOT_REQ     0x20
 
 #define SYSEX_TYPE_CONFIG_RESP    0x30
 #define SYSEX_TYPE_BANK_INFO_RESP 0x40
 #define SYSEX_TYPE_BANK_CHUNK_RESP 0x41
+#define SYSEX_TYPE_SLOTS_INFO_RESP 0x42
 #define SYSEX_TYPE_ACK            0x31
 #define SYSEX_TYPE_NACK           0x32
 
@@ -67,6 +70,12 @@
 #define SYSEX_BANK_CHUNK_HEADER_BYTES 6
 #define SYSEX_MAX_PAYLOAD (SYSEX_BANK_CHUNK_HEADER_BYTES + SYSEX_BANK_CHUNK_HEX_BYTES)
 
+// Slot-info response: one byte per note/channel, one length byte + label per
+// slot. Labels are truncated - they're only for display, not identity.
+#define SYSEX_SLOT_LABEL_MAX      23
+#define SYSEX_MAX_SLOTS_REPORTED  32
+#define SYSEX_SLOTS_MAX_PAYLOAD   (1 + SYSEX_MAX_SLOTS_REPORTED * (3 + SYSEX_SLOT_LABEL_MAX))
+
 static Settings current_settings;
 
 enum PendingSysexAction : uint8_t {
@@ -77,6 +86,7 @@ enum PendingSysexAction : uint8_t {
     PENDING_REBOOT_BOOTSEL = 4,
     PENDING_SEND_BANK_INFO = 5,
     PENDING_SEND_BANK_CHUNK = 6,
+    PENDING_SEND_SLOTS_INFO = 7,
 };
 
 struct PendingSysexItem {
@@ -94,6 +104,7 @@ static PendingSysexItem pending_sysex_queue[8];
 static void send_config_sysex(uint8_t req_id = 0);
 static void send_bank_info_sysex(uint8_t req_id, uint8_t slot);
 static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_idx);
+static void send_slots_info_sysex(uint8_t req_id);
 
 static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 0, uint8_t arg2 = 0, uint8_t arg3 = 0) {
     noInterrupts();
@@ -223,6 +234,9 @@ static void process_pending_sysex_responses() {
                 send_bank_chunk_sysex(item.req_id, item.arg, idx);
                 break;
             }
+            case PENDING_SEND_SLOTS_INFO:
+                send_slots_info_sysex(item.req_id);
+                break;
             default:
                 break;
         }
@@ -323,6 +337,44 @@ static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_i
     }
 
     send_sysex_frame(SYSEX_TYPE_BANK_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_BANK_CHUNK_HEADER_BYTES + raw_len * 2));
+}
+
+// Reports the currently active MIDIOutputProcessor's slots generically (by
+// index: note, channel, label) so the web tool never has to hardcode which
+// processor subclass (Full/Half drum kit etc.) is compiled in.
+static void send_slots_info_sysex(uint8_t req_id) {
+    GenericList<BaseOutput*> *nodes = output_processor ? output_processor->get_available_outputs() : nullptr;
+    if (!nodes) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+
+    unsigned count = (unsigned)nodes->size();
+    if (count > SYSEX_MAX_SLOTS_REPORTED) count = SYSEX_MAX_SLOTS_REPORTED;
+
+    uint8_t payload[SYSEX_SLOTS_MAX_PAYLOAD];
+    uint16_t pos = 0;
+    payload[pos++] = (uint8_t)count;
+
+    for (unsigned i = 0; i < count; ++i) {
+        BaseOutput *node = nodes->get(i);
+        // BaseOutput::get_note_number()/get_channel() default to -1 for non-MIDI
+        // outputs; MIDIBaseOutput (and its subclasses) override them. No RTTI needed.
+        int8_t note = node ? (int8_t)node->get_note_number() : -1;
+        int8_t channel = node ? (int8_t)node->get_channel() : -1;
+        const char *label = (node && node->label[0]) ? node->label : "";
+
+        uint8_t label_len = 0;
+        while (label[label_len] != '\0' && label_len < SYSEX_SLOT_LABEL_MAX) ++label_len;
+
+        payload[pos++] = (uint8_t)note & 0x7F;
+        payload[pos++] = (uint8_t)channel & 0x7F;
+        payload[pos++] = label_len;
+        memcpy(payload + pos, label, label_len);
+        pos += label_len;
+    }
+
+    send_sysex_frame(SYSEX_TYPE_SLOTS_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, pos);
 }
 
 static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
@@ -427,6 +479,13 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         const uint8_t idx_lo = d[1] & 0x7F;
         const uint8_t idx_hi = d[2] & 0x7F;
         enqueue_pending_sysex(PENDING_SEND_BANK_CHUNK, req_id, slot, idx_lo, idx_hi);
+
+    } else if (type == SYSEX_TYPE_GET_SLOTS_REQ) {
+        if (payload_len != 0) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        enqueue_pending_sysex(PENDING_SEND_SLOTS_INFO, req_id);
 
     } else if (type == SYSEX_TYPE_SET_CONFIG_REQ) {
         if (payload_len < SYSEX_DATA_LEN) {
