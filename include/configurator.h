@@ -517,7 +517,15 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         current_settings.knob_role[1]     = (InputRole)d[17];
         current_settings.knob_role[2]     = (InputRole)d[18];
 
-        settings_save(&current_settings);
+        // Optional 20th payload byte: persist flag. 1 (or absent, for
+        // backwards compatibility with older web-tool builds) writes the
+        // settings to flash immediately. 0 applies them to the running
+        // device only, without a flash write - lets the web tool "try out"
+        // settings (e.g. active bank) live without wearing flash's limited
+        // rewrite lifetime; an explicit save (persist=1) is needed to make
+        // the change survive a reboot.
+        const bool persist = (payload_len < SYSEX_DATA_LEN + 1) || (d[SYSEX_DATA_LEN] != 0);
+        if (persist) settings_save(&current_settings);
         if ((int)current_settings.active_bank != bankManager.active_bank()) {
             if (!bankManager.switch_bank(current_settings.active_bank)) {
                 enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);

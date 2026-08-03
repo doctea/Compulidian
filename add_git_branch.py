@@ -9,13 +9,13 @@ def make_version_header():
     subprocess.run(["git", "update-index", "--skip-worktree", "include/__version.h"])
 
     # fetch branch info from git
-    ret = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=subprocess.PIPE, text=True)
+    ret = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     build_version = ret.stdout.strip()
-    ret = subprocess.run(["git", "rev-parse", "--short", "HEAD"], stdout=subprocess.PIPE, text=True)
+    ret = subprocess.run(["git", "rev-parse", "--short", "HEAD"], stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     build_version += " "
     build_version += ret.stdout.strip()
 
-    ret = subprocess.run(["git", "diff", "HEAD"], stdout=subprocess.PIPE, text=True)
+    ret = subprocess.run(["git", "diff", "HEAD"], stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     status = " clean" if ret.stdout.strip()=="" else " (dirty)"
     build_version += status
 

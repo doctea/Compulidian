@@ -83,6 +83,40 @@
   <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
 </div>
 
+<div id="action-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
+  <div class="col">
+    <label>Active bank <span style="text-transform:none;font-weight:400">(plays now)</span></label>
+    <select id="cfg-active-bank" onchange="applyConfigLive()">
+      <option value="0">0 — Compiled-in (808)</option>
+      <option value="1">1 — Flash bank 1</option>
+      <option value="2">2 — Flash bank 2</option>
+      <option value="3">3 — Flash bank 3</option>
+      <option value="4">4 — Flash bank 4</option>
+    </select>
+  </div>
+  <span id="cfg-banks-available" style="font-size:.8rem;color:var(--muted)"></span>
+  <!--<div style="flex:1 1 auto"></div>-->
+  <button class="btn primary" onclick="saveConfig()" title="Write current settings to flash so they survive a reboot">💾 Save to Device</button>
+  <button class="btn" onclick="readConfig()">↺ Read Config</button>
+  <button class="btn danger" onclick="rebootToBootloader()">⏻ Reboot to Flash Mode</button>
+</div>
+
+<div id="status-bar" style="padding:.5rem 1.5rem;border-bottom:1px solid var(--border)">
+  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+  <div id="status"></div>
+</div>
+
+<details id="midi-log-panel" style="margin:0 1.5rem;border-bottom:1px solid var(--border)">
+  <summary style="cursor:pointer;padding:.5rem 0;font-size:.8rem;color:var(--muted)">MIDI Debug Log</summary>
+  <div style="padding-bottom:.75rem">
+    <div class="row" style="margin-bottom:.5rem">
+      <button class="btn" onclick="clearMidiLog()">Clear MIDI Log</button>
+      <span id="midi-runtime-tag" style="font-size:.75rem;color:var(--muted)"></span>
+    </div>
+    <pre id="midi-debug-log" style="max-height:180px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;color:var(--muted);white-space:pre-wrap"></pre>
+  </div>
+</details>
+
 <nav>
   <button class="active" onclick="switchTab('bank', this)">Bank Management</button>
   <button onclick="switchTab('io', this)">Output/Input Mapping</button>
@@ -104,7 +138,7 @@
     <div class="row">
       <div class="col">
         <label>Editing bank slot</label>
-        <select id="bank-slot" onchange="updateBudget()"></select>
+        <select id="bank-slot" onchange="onBankSlotChanged()"></select>
       </div>
       <div class="col">
         <label>Flash size</label>
@@ -127,6 +161,9 @@
         </select>
       </div>
     </div>
+
+    <div id="bank-active-indicator" style="font-size:.8rem;color:var(--muted);margin-bottom:.4rem"></div>
+    <div id="bank-state-banner" style="font-size:.8rem;margin-bottom:.75rem;min-height:1.2em"></div>
 
     <table id="slot-table">
       <thead><tr>
@@ -158,13 +195,9 @@
     <div class="row">
       <button class="btn primary" onclick="flashToDevice()">⚡ Flash to Device</button>
       <button class="btn" onclick="downloadUF2()">⬇ Download UF2</button>
-      <button class="btn" onclick="readFromDevice()">⬆ Pull Sample Data from Device</button>
+      <button class="btn" id="pull-from-device-btn" onclick="readFromDevice()">⬆ Pull Sample Data from Device</button>
       <button class="btn danger" onclick="rebootToBootloader()">↺ Reboot to Flash Mode</button>
     </div>
-
-
-    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-    <div id="status"></div>
 
     <div class="section-title">Flash Memory Budget</div>
     <div id="budget-bar-wrap" style="background:var(--surface);border-radius:4px;height:16px;position:relative;overflow:hidden">
@@ -181,7 +214,7 @@
      ===================================================================== -->
 <div id="tab-io" class="tab">
 
-  <div class="section-title">Output Jack Configuration</div>
+  <div class="section-title">Jack Configuration</div>
   <div class="grid4" id="cfg-outputs">
     <!-- filled by renderOutputs() -->
   </div>
@@ -191,12 +224,6 @@
     <!-- filled by renderCVInputs() -->
   </div>
 
-  <div class="row" style="margin-top:1.25rem">
-    <button class="btn primary" onclick="saveConfig()">💾 Save to Device</button>
-    <button class="btn" onclick="readConfig()">↺ Read from Device</button>
-  </div>
-  <div class="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
-
 </div><!-- /tab-io -->
 
 <!-- =====================================================================
@@ -204,39 +231,12 @@
      ===================================================================== -->
 <div id="tab-other" class="tab">
 
-  <div class="section-title">Active Sample Bank</div>
-  <div class="row">
-    <div class="col">
-      <label>Active bank</label>
-      <select id="cfg-active-bank">
-        <option value="0">0 — Compiled-in (808)</option>
-        <option value="1">1 — Flash bank 1</option>
-        <option value="2">2 — Flash bank 2</option>
-        <option value="3">3 — Flash bank 3</option>
-        <option value="4">4 — Flash bank 4</option>
-      </select>
-    </div>
-    <div class="col" style="justify-content:flex-end">
-      <span id="cfg-banks-available" style="font-size:.8rem;color:var(--muted)"></span>
-    </div>
-  </div>
-
   <div class="section-title">Knob Roles</div>
   <div class="grid4" id="cfg-knobs" style="grid-template-columns:repeat(3,1fr)">
     <!-- filled by renderKnobs() -->
   </div>
 
-  <div class="row" style="margin-top:1.25rem">
-    <button class="btn primary" onclick="saveConfig()">💾 Save to Device</button>
-    <button class="btn" onclick="readConfig()">↺ Read from Device</button>
-  </div>
-  <div class="config-status" style="font-size:.85rem;color:var(--muted);margin-top:.5rem"></div>
-
-  <div class="row" style="margin-top:.5rem">
-    <button class="btn" onclick="clearMidiLog()">Clear MIDI Log</button>
-    <span id="midi-runtime-tag" style="font-size:.75rem;color:var(--muted)"></span>
-  </div>
-  <pre id="midi-debug-log" style="margin-top:.5rem;max-height:180px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;color:var(--muted);white-space:pre-wrap"></pre>
+  <p style="color:var(--muted);font-size:.8rem;margin-top:1.25rem">More device settings will appear here in future updates.</p>
 
 </div><!-- /tab-other -->
 
@@ -555,6 +555,94 @@ function resetBankSlotsForCurrentSlots() {
   bankSlots = slots.map(() => emptyBankSlot());
 }
 
+// Bank-editing state, shown in the bank-management banners:
+// - bankDirty: true once bankSlots has been edited in-browser since the last
+//   successful flash/pull, i.e. there are changes not yet on the device.
+// - loadedForSlot: which device bank-slot number (1-4) the in-memory
+//   bankSlots actually came from (via pull or UF2 load), or null if it's
+//   just a blank template that was never read from/written to a real slot.
+let bankDirty = false;
+let loadedForSlot = null;
+// bankValidity[slot] = true/false once known (via GET_BANK_INFO_REQ), absent if unknown.
+let bankValidity = {};
+
+function markBankDirty() {
+  bankDirty = true;
+  updateBankStateBanner();
+}
+
+function updateBankStateBanner() {
+  const activeEl = document.getElementById('bank-active-indicator');
+  const stateEl  = document.getElementById('bank-state-banner');
+  if (!activeEl || !stateEl) return;
+
+  const selectedSlot = parseInt(document.getElementById('bank-slot').value);
+  const activeBankEl = document.getElementById('cfg-active-bank');
+  const activeBank = activeBankEl ? parseInt(activeBankEl.value) : NaN;
+
+  if (!isNaN(activeBank)) {
+    activeEl.textContent = (selectedSlot === activeBank)
+      ? `Editing slot ${selectedSlot} — this is the device's currently active bank.`
+      : `Editing slot ${selectedSlot} — the device is currently playing bank ${activeBank}.`;
+  } else {
+    activeEl.textContent = '';
+  }
+
+  if (bankDirty) {
+    stateEl.textContent = '● Unsaved changes — use ⚡ Flash to Device or ⬇ Download UF2 to apply them.';
+    stateEl.style.color = 'var(--accent)';
+  } else if (loadedForSlot !== selectedSlot) {
+    stateEl.textContent = 'This bank slot has not been pulled from the device yet — showing a blank/unrelated template. Use ⬆ Pull Sample Data from Device first if you want to see what’s actually there before editing.';
+    stateEl.style.color = 'var(--muted)';
+  } else {
+    stateEl.textContent = '';
+  }
+}
+
+function updateBankSlotOptionLabels() {
+  const sel = document.getElementById('bank-slot');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const slot = parseInt(opt.value);
+    opt.textContent = (bankValidity[slot] === false) ? `Slot ${slot} (empty)` : `Slot ${slot}`;
+  }
+}
+
+function updateBankActionAvailability() {
+  const slot = parseInt(document.getElementById('bank-slot').value);
+  const pullBtn = document.getElementById('pull-from-device-btn');
+  if (!pullBtn) return;
+  const known = bankValidity[slot];
+  pullBtn.disabled = (known === false);
+  pullBtn.title = (known === false) ? 'This bank slot is empty on the device — nothing to pull.' : '';
+}
+
+// Best-effort: query each bank slot's validity so the slot dropdown and Pull
+// button can reflect empty slots instead of failing with a raw NACK later.
+async function refreshBankValidity() {
+  if (!midiOutput) return;
+  for (let slot = 1; slot <= 4; slot++) {
+    try {
+      await requestSysexResponse(SYSEX_TYPE_GET_BANK_INFO_REQ, [slot & 0x7F], [SYSEX_TYPE_BANK_INFO_RESP], 1200, 1);
+      bankValidity[slot] = true;
+    } catch (e) {
+      const msg = (e && e.message) || '';
+      if (msg.includes('NACK 4')) bankValidity[slot] = false;
+      // Any other failure (timeout etc.) is inconclusive - leave unknown so we
+      // don't block the user with a false negative.
+    }
+  }
+  updateBankSlotOptionLabels();
+  updateBankActionAvailability();
+}
+
+function onBankSlotChanged() {
+  updateBudget();
+  updateBankActionAvailability();
+  updateBankStateBanner();
+}
+window.onBankSlotChanged = onBankSlotChanged;
+
 function updateSlotsGateUI() {
   const gate   = document.getElementById('slots-gate');
   const editor = document.getElementById('bank-editor');
@@ -591,6 +679,8 @@ function updateSlotTable() {
            onchange="setSlotField(${i}, 'fallbackToBuiltin', this.checked)">
       </td>
       <td style="white-space:nowrap">
+        <button class="btn" style="padding:.2rem .5rem" title="Swap with previous slot" onclick="moveSlot(${i}, -1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn" style="padding:.2rem .5rem" title="Swap with next slot" onclick="moveSlot(${i}, 1)" ${i === slots.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="btn" style="padding:.2rem .5rem" title="Replace sample" onclick="replaceSlot(${i})">⇪</button>
         <button class="btn" style="padding:.2rem .5rem" title="Clear slot" onclick="clearSlot(${i})">✕</button>
         <button class="btn" style="padding:.2rem .5rem" title="Audition in browser" onclick="auditionSlotBrowser(${i})" ${s.int16Data ? '' : 'disabled'}>▶</button>
@@ -599,13 +689,29 @@ function updateSlotTable() {
     tbody.appendChild(tr);
   }
   updateBudget();
+  updateBankStateBanner();
 }
 
 function setSlotField(i, field, value) {
   if (!bankSlots[i]) bankSlots[i] = emptyBankSlot();
   bankSlots[i][field] = value;
+  markBankDirty();
   updateSlotTable();
 }
+window.setSlotField = setSlotField;
+
+// Swap two slots' sample data in place - no re-encoding/re-upload of audio
+// needed, since the MIDI note stays tied to the *position*, not the sample.
+function moveSlot(i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= bankSlots.length) return;
+  const tmp = bankSlots[i] || emptyBankSlot();
+  bankSlots[i] = bankSlots[j] || emptyBankSlot();
+  bankSlots[j] = tmp;
+  markBankDirty();
+  updateSlotTable();
+}
+window.moveSlot = moveSlot;
 
 function replaceSlot(i) {
   pendingReplaceIndex = i;
@@ -617,6 +723,7 @@ function clearSlot(i) {
   const fallback = bankSlots[i] ? bankSlots[i].fallbackToBuiltin : false;
   bankSlots[i] = emptyBankSlot();
   bankSlots[i].fallbackToBuiltin = fallback;
+  markBankDirty();
   updateSlotTable();
 }
 window.clearSlot = clearSlot;
@@ -636,6 +743,7 @@ async function handleReplaceInput(fileList) {
       volume: 127, rate, int16Data: data,
       cleared: false, fallbackToBuiltin: fallback
     };
+    markBankDirty();
     setStatus('');
   } catch(e) {
     setStatus(`Error loading ${f.name}: ${e.message}`, true);
@@ -684,6 +792,7 @@ function updateBudget() {
   bar.style.background = pct > 90 ? 'var(--danger)' : pct > 70 ? '#f59e0b' : 'var(--ok)';
   document.getElementById('budget-bar-wrap').style.display = 'block';
 }
+window.updateBudget = updateBudget;
 
 // ============================================================================
 // File handling
@@ -721,6 +830,7 @@ async function handleFileInput(fileList) {
         volume: 127, rate, int16Data: data,
         cleared: false, fallbackToBuiltin: bankSlots[idx] ? bankSlots[idx].fallbackToBuiltin : false
       };
+      markBankDirty();
     } catch(e) {
       setStatus(`Error loading ${f.name}: ${e.message}`, true);
     }
@@ -744,7 +854,10 @@ function updateSlotOptions() {
     opt.value = i; opt.textContent = `Slot ${i}`;
     sel.appendChild(opt);
   }
+  updateBankSlotOptionLabels();
+  updateBankActionAvailability();
   updateBudget();
+  updateBankStateBanner();
 }
 window.updateSlotOptions = updateSlotOptions;
 updateSlotOptions();
@@ -796,6 +909,12 @@ async function flashToDevice() {
   try {
     await pico.flashEraseAndWrite(addr, binary, (pct) => showProgress(pct));
     await pico.reboot(200);
+    bankDirty = false;
+    loadedForSlot = slot;
+    bankValidity[slot] = true;
+    updateBankSlotOptionLabels();
+    updateBankActionAvailability();
+    updateBankStateBanner();
     setStatus(`✓ Bank ${slot} flashed successfully (${(binary.length/1024).toFixed(1)} KB). Device rebooting…`, false, true);
   } catch(e) {
     setStatus('Flash failed: ' + e.message, true);
@@ -840,7 +959,15 @@ async function readFromDevice(forceFlashMode = false) {
       setStatus(`✓ Read bank ${slot} via MIDI runtime`, false, true);
       return;
     } catch (e) {
-      setStatus(`Runtime MIDI read failed: ${e.message}`, true);
+      const msg = (e && e.message) || String(e);
+      if (msg.includes('NACK 4')) {
+        bankValidity[slot] = false;
+        updateBankSlotOptionLabels();
+        updateBankActionAvailability();
+        setStatus(`Bank ${slot} appears to be empty on the device — nothing to pull.`, true);
+      } else {
+        setStatus(`Runtime MIDI read failed: ${msg}`, true);
+      }
       return;
     }
   }
@@ -866,6 +993,9 @@ async function readFromDevice(forceFlashMode = false) {
     const rawHdr = await flashReadChunked(pico, addr, BANK_HEADER_SIZE, 'Header read');
     const dv     = new DataView(rawHdr.buffer);
     if (dv.getUint32(0, true) !== BANK_MAGIC) {
+      bankValidity[slot] = false;
+      updateBankSlotOptionLabels();
+      updateBankActionAvailability();
       setStatus(`Slot ${slot} is empty (magic 0x${dv.getUint32(0,true).toString(16)}).`); return;
     }
     const numSamples = dv.getUint32(8, true);
@@ -1029,6 +1159,11 @@ async function parseBankBinary(binary, baseAddr = null) {
   }
 
   bankSlots = parsed;
+  bankDirty = false;
+  loadedForSlot = parseInt(document.getElementById('bank-slot').value);
+  bankValidity[loadedForSlot] = true;
+  updateBankSlotOptionLabels();
+  updateBankActionAvailability();
   updateSlotTable();
 
   const addrTag = typeof baseAddr === 'number'
@@ -1220,11 +1355,9 @@ function midiDot(on) {
 }
 
 function setConfigStatus(msg, isError = false, isOk = false) {
-  const color = isError ? 'var(--danger)' : (isOk ? 'var(--ok)' : 'var(--muted)');
-  document.querySelectorAll('.config-status').forEach(el => {
-    el.textContent = msg;
-    el.style.color = color;
-  });
+  // The IO/Other tabs no longer have their own status readouts - everything
+  // is unified into the single #status element in the shared status bar.
+  setStatus(msg, isError, isOk);
 }
 
 function matchesCompulidianName(device) {
@@ -1741,6 +1874,12 @@ async function midiConnect(isReconnectAttempt = false) {
   } catch (e) {
     setStatus('Failed to read device slots: ' + e.message, true);
   }
+
+  try {
+    await refreshBankValidity();
+  } catch (e) {
+    midiDebug('bank validity refresh failed', e && e.message);
+  }
 }
 window.midiConnect = midiConnect;
 
@@ -1804,6 +1943,7 @@ async function saveConfig() {
     throw new Error('Not connected');
   }
   const d = buildCfgFromUI();
+  d.push(1); // persist=1 -> write to flash so it survives a reboot
   setConfigStatus('Config sent. Waiting for confirmation…', false, false);
   try {
     await requestSysexResponse(
@@ -1821,12 +1961,35 @@ window.saveConfig = () => saveConfig().catch(e => {
   console.warn('saveConfig failed:', e);
 });
 
+// Applies the current UI settings to the device immediately without writing
+// to flash - lets the user "try out" an active-bank change or output/CV/knob
+// role tweak without wearing the flash's limited rewrite lifetime. An
+// explicit "Save to Device" is still required to persist the change.
+async function applyConfigLive() {
+  updateBankStateBanner();
+  if (!midiOutput) return;
+  const d = buildCfgFromUI();
+  d.push(0); // persist=0 -> apply only, do not write to flash
+  try {
+    await requestSysexResponse(
+      SYSEX_TYPE_SET_CONFIG_REQ,
+      d,
+      [SYSEX_TYPE_CONFIG_RESP]
+    );
+    setConfigStatus('Applied (not saved to flash — click 💾 Save to Device to make it permanent).', false, true);
+  } catch (e) {
+    setConfigStatus('Live apply failed: ' + e.message, true, false);
+  }
+}
+window.applyConfigLive = applyConfigLive;
+
 // ============================================================================
 // Config UI rendering
 // ============================================================================
-function selectHtml(id, opts, val) {
+function selectHtml(id, opts, val, onchange = '') {
   const optsHtml = opts.map((o, i) => `<option value="${i}"${i===val?' selected':''}>${o}</option>`).join('');
-  return `<select id="${id}" style="width:100%">${optsHtml}</select>`;
+  const oc = onchange ? ` onchange="${onchange}"` : '';
+  return `<select id="${id}"${oc} style="width:100%">${optsHtml}</select>`;
 }
 
 function renderOutputs() {
@@ -1837,9 +2000,9 @@ function renderOutputs() {
     card.className = 'card';
     card.innerHTML = `
       <h3>${OUTPUT_LABELS[i]}</h3>
-      <label>Type</label>${selectHtml(`out-type-${i}`, OUTPUT_TYPES, 0)}
+      <label>Type</label>${selectHtml(`out-type-${i}`, OUTPUT_TYPES, 0, 'applyConfigLive()')}
       <label style="margin-top:.5rem">Channel / Voice</label>
-      <input type="number" id="out-ch-${i}" min="0" max="16" value="1" style="width:100%">`;
+      <input type="number" id="out-ch-${i}" min="0" max="16" value="1" style="width:100%" onchange="applyConfigLive()">`;
     cont.appendChild(card);
   }
 }
@@ -1850,7 +2013,7 @@ function renderCVInputs() {
   for (let i = 0; i < 2; i++) {
     const card = document.createElement('div');
     card.className = 'card';
-    card.innerHTML = `<h3>${CV_LABELS[i]}</h3><label>Role</label>${selectHtml(`cv-role-${i}`, INPUT_ROLES, 0)}`;
+    card.innerHTML = `<h3>${CV_LABELS[i]}</h3><label>Role</label>${selectHtml(`cv-role-${i}`, INPUT_ROLES, 0, 'applyConfigLive()')}`;
     cont.appendChild(card);
   }
 }
@@ -1861,7 +2024,7 @@ function renderKnobs() {
   for (let i = 0; i < 3; i++) {
     const card = document.createElement('div');
     card.className = 'card';
-    card.innerHTML = `<h3>${KNOB_LABELS[i]} Knob</h3><label>Role</label>${selectHtml(`knob-role-${i}`, INPUT_ROLES, 0)}`;
+    card.innerHTML = `<h3>${KNOB_LABELS[i]} Knob</h3><label>Role</label>${selectHtml(`knob-role-${i}`, INPUT_ROLES, 0, 'applyConfigLive()')}`;
     cont.appendChild(card);
   }
 }
@@ -1893,6 +2056,7 @@ function applyCfgToUI(d) {
     const opt   = document.querySelector(`#cfg-active-bank option[value="${slot}"]`);
     if (opt) opt.textContent = name ? `${slot} \u2014 ${name}` : `${slot} \u2014 Flash bank ${slot}`;
   }
+  updateBankStateBanner();
 }
 
 function buildCfgFromUI() {

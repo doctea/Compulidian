@@ -14,15 +14,17 @@
     extern Adafruit_USBD_MIDI usb_midi;
     extern midi::MidiInterface<midi::SerialMIDI<Adafruit_USBD_MIDI>> USBMIDI;
 #endif
+
+// extern SamplePlayer sw;
 class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
   //uint leds_map[NUM_LEDS] = { LED5, LED6, LED4, LED3, LED1, LED2 };
 
   public:
     bool muted = false;
     bool debug = false;
-    ComputerCard *sw = nullptr;
+    SamplePlayer *sw = nullptr;
 
-    WorkshopOutputWrapper(ComputerCard *sw) {
+    WorkshopOutputWrapper(SamplePlayer *sw) {
         this->sw = sw;
     }
 
@@ -166,6 +168,11 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
             if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
+            if (sw->enable_volume) {
+                voice[voice_number].level = map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
+            } else {
+                voice[voice_number].level = 127;
+            }
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         } else {
             if (Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
