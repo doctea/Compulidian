@@ -169,7 +169,8 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
             if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             if (sw->enable_volume) {
-                voice[voice_number].level = map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
+                // @@TODO: figure out the correct velocity scaling to use here
+                voice[voice_number].level = velocity; //map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
             } else {
                 voice[voice_number].level = 127;
             }
