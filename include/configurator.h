@@ -151,12 +151,18 @@ static bool midi_write_byte_blocking_(uint8_t b, uint32_t start_ms) {
 }
 
 static bool send_sysex_bytes_reliable_(const uint8_t *data, size_t len) {
+    // Held for the whole frame - do_tick() can re-enter mid blocking-write
+    // (via tud_task()), so a note echo firing in between would otherwise
+    // interleave its raw bytes into this sysex frame. See workshop_output.h.
+    g_usbmidi_tx_busy = true;
     const uint32_t start_ms = millis();
-    if (!midi_write_byte_blocking_(0xF0, start_ms)) return false;
-    for (size_t i = 0; i < len; ++i) {
-        if (!midi_write_byte_blocking_(data[i], start_ms)) return false;
+    bool ok = midi_write_byte_blocking_(0xF0, start_ms);
+    for (size_t i = 0; ok && i < len; ++i) {
+        ok = midi_write_byte_blocking_(data[i], start_ms);
     }
-    return midi_write_byte_blocking_(0xF7, start_ms);
+    ok = ok && midi_write_byte_blocking_(0xF7, start_ms);
+    g_usbmidi_tx_busy = false;
+    return ok;
 }
 
 static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const uint8_t *payload, uint16_t payload_len) {

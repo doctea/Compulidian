@@ -106,6 +106,14 @@ void global_on_restart() {
 void setup_usb();
 void setup_midi();
 
+// respond to incoming USB MIDI note on/off messages by sending them to the output wrapper
+void pc_usb_midi_handle_note_on(uint8_t channel, uint8_t note, uint8_t velocity) {
+  output_wrapper.sendNoteOn(note, velocity, channel);
+}
+void pc_usb_midi_handle_note_off(uint8_t channel, uint8_t note, uint8_t velocity) {
+  output_wrapper.sendNoteOff(note, velocity, channel);
+}
+
 void setup() {
 
   set_sys_clock_khz(150000, true);
@@ -127,6 +135,10 @@ void setup() {
 
   // Register SysEx handler for web config tool
   USBMIDI.setHandleSystemExclusive(handle_sysex);
+
+  // Register callbacks for incoming USB MIDI note messages
+  USBMIDI.setHandleNoteOn(pc_usb_midi_handle_note_on);
+  USBMIDI.setHandleNoteOff(pc_usb_midi_handle_note_off);
 
   setup_uclock(do_tick);
   set_global_restart_callback(global_on_restart);

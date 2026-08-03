@@ -10,6 +10,8 @@ BaseSampleData **sample_data = nullptr;
 
 extern std::atomic<bool> started;
 
+std::atomic<bool> g_usbmidi_tx_busy{false};
+
 /* sample player stuff starts */
 
 voice_t voice[] = {

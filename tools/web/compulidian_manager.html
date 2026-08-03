@@ -60,6 +60,8 @@
   .midi-status.on { background: var(--ok); }
   #server-warning { background: #78350f; border: 1px solid #b45309; border-radius: 8px; padding: .75rem 1rem; margin: .75rem 1.5rem; font-size: .85rem; display: none; }
   #server-warning strong { color: var(--accent); }
+
+  .playing-slot { background: rgba(255,255,255,1) !important; }
 </style>
 </head>
 <body>
@@ -488,6 +490,8 @@ function buildBankBinary(bankName, slotDescs, slotData) {
   const hv = new DataView(header);
   const enc = new TextEncoder();
 
+  const validEntries = slotData.reduce((n, s) => n + (s && s.int16Data ? 1 : 0), 0);
+
   hv.setUint32(0, BANK_MAGIC,          true);
   hv.setUint32(4, BANK_VERSION,        true);
   hv.setUint32(8, slotDescs.length,    true);
@@ -590,7 +594,7 @@ function updateSlotTable() {
         <button class="btn" style="padding:.2rem .5rem" title="Replace sample" onclick="replaceSlot(${i})">⇪</button>
         <button class="btn" style="padding:.2rem .5rem" title="Clear slot" onclick="clearSlot(${i})">✕</button>
         <button class="btn" style="padding:.2rem .5rem" title="Audition in browser" onclick="auditionSlotBrowser(${i})" ${s.int16Data ? '' : 'disabled'}>▶</button>
-        <button class="btn" style="padding:.2rem .5rem" title="Audition on device (active bank only)" onclick="auditionSlotDevice(${i})">🔊</button>
+        <button class="btn audition-button" data-note="${slot.note}" style="padding:.2rem .5rem" title="Audition on device (active bank only)" onclick="auditionSlotDevice(${i})">🔊</button>
       </td>`;
     tbody.appendChild(tr);
   }
@@ -1151,8 +1155,6 @@ const KNOB_LABELS    = ['Main', 'X', 'Y'];
 let midiOutput  = null;
 let midiInput   = null;
 let midiInputsBound = [];
-let nativeMidiAccess = null;
-let nativeInputsBound = [];
 let currentCfg  = null;  // raw config payload from last SYSEX_TYPE_CONFIG_RESP
 
 const midiPendingRequests = new Map();
@@ -1282,15 +1284,6 @@ function clearInputBindings() {
     }
   }
   midiInputsBound = [];
-
-  for (const input of nativeInputsBound) {
-    try {
-      if (input) input.onmidimessage = null;
-    } catch (e) {
-      console.warn('Failed to detach native MIDI listener:', e);
-    }
-  }
-  nativeInputsBound = [];
 }
 
 function resetMidiBinding() {
@@ -1313,6 +1306,26 @@ function bindMidiInputListener(input) {
     midiDebug('rx raw sysex', raw);
     handleIncomingSysex(raw);
   });
+
+  input.addListener('noteon', e => {
+    midiDebug('rx noteon', { note: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
+    // find the button that matches this note number, if any, and add a temporary border to indicate it is playing
+    const btn = document.querySelector(`.audition-button[data-note="${e.note.number}"]`);
+    if (btn) {
+      btn.classList.add('playing-slot');
+      setTimeout(() => btn.classList.remove('playing-slot'), 2000);  // default 2s timeout to remove the border in case noteoff is missed
+    }
+  });
+
+  input.addListener('noteoff', e => {
+    midiDebug('rx noteoff', { note: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
+    // find the button that matches this note number, if any, and remove the temporary border
+    const btn = document.querySelector(`.audition-button[data-note="${e.note.number}"]`);
+    if (btn) {
+      btn.classList.remove('playing-slot');
+    }
+  });
+
 }
 
 function bindAllMatchingInputs(inputs) {
@@ -1324,21 +1337,6 @@ function bindAllMatchingInputs(inputs) {
     bindMidiInputListener(input);
   }
   midiInputsBound = matches;
-
-  if (nativeMidiAccess) {
-    const nativeInputs = MIDI_BIND_ALL_INPUTS
-      ? Array.from(nativeMidiAccess.inputs.values())
-      : getCompulidianInputs(Array.from(nativeMidiAccess.inputs.values()));
-    for (const input of nativeInputs) {
-      input.onmidimessage = ev => {
-        const raw = Array.from(ev.data || []);
-        midiDebug('rx raw sysex (native)', raw);
-        handleIncomingSysex(raw);
-      };
-    }
-    nativeInputsBound = nativeInputs;
-    midiDebug('native listeners bound', nativeInputs.map(i => ({ name: i.name, id: i.id })));
-  }
 
   return matches;
 }
@@ -1656,22 +1654,6 @@ async function ensureMidiEnabled() {
     WebMidi.addListener('disconnected', onAnyMidiStateChange);
     webMidiReady = true;
   }
-
-  // Native MIDIAccess fallback for SysEx reception diagnostics/reliability.
-  midiDebug('native requestMIDIAccess availability', typeof navigator.requestMIDIAccess);
-  if (!nativeMidiAccess && navigator.requestMIDIAccess) {
-    try {
-      nativeMidiAccess = await navigator.requestMIDIAccess({ sysex: true });
-      midiDebug('Native MIDIAccess enabled', {
-        inputs: Array.from(nativeMidiAccess.inputs.values()).map(d => d.name),
-        outputs: Array.from(nativeMidiAccess.outputs.values()).map(d => d.name)
-      });
-    } catch (e) {
-      midiDebug('Native MIDIAccess unavailable', e.message || e);
-    }
-  } else if (!navigator.requestMIDIAccess) {
-    midiDebug('Native MIDIAccess unavailable', 'navigator.requestMIDIAccess is undefined');
-  }
 }
 
 function requestSysexResponse(type, payload = [], expectedTypes = [SYSEX_TYPE_CONFIG_RESP], timeoutMs = MIDI_REQUEST_TIMEOUT_MS, retries = MIDI_MAX_RETRIES) {
@@ -1937,8 +1919,7 @@ renderKnobs();
 
 const midiRuntimeTagEl = document.getElementById('midi-runtime-tag');
 if (midiRuntimeTagEl) {
-  const nativeAvail = typeof navigator.requestMIDIAccess;
-  midiRuntimeTagEl.textContent = `Runtime ${MIDI_RUNTIME_TAG} | native MIDIAccess: ${nativeAvail}`;
+  midiRuntimeTagEl.textContent = `Runtime ${MIDI_RUNTIME_TAG}`;
 }
 midiDebug('runtime', MIDI_RUNTIME_TAG);
 midiDebug('page loaded', new Date().toISOString());

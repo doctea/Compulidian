@@ -7,4 +7,4 @@
 #define ChosenDrumKitMIDIOutputProcessor FullDrumKitMIDIOutputProcessor
 //#define ChosenDrumKitMIDIOutputProcessor HalfDrumKitMIDIOutputProcessor
 
-#define WAIT_FOR_SERIAL   // for debugging - wait for serial to be connected before starting
+// #define WAIT_FOR_SERIAL   // for debugging - wait for serial to be connected before starting

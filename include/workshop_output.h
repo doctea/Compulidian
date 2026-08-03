@@ -135,7 +135,9 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
             return;
         }
         #ifdef USE_TINYUSB
-            USBMIDI.sendNoteOn(pitch, velocity, channel);
+            // Skip the echo (not the actual trigger below) if a SysEx frame is
+            // mid-transmission - interleaving raw bytes here would corrupt it.
+            if (!g_usbmidi_tx_busy) USBMIDI.sendNoteOn(pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
         if (debug)
@@ -172,7 +174,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
         #ifdef USE_TINYUSB
-            USBMIDI.sendNoteOff(pitch, velocity, channel);
+            if (!g_usbmidi_tx_busy) USBMIDI.sendNoteOff(pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
 

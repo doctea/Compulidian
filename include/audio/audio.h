@@ -1,11 +1,18 @@
 #pragma once
 
 #include <SPI.h>
+#include <atomic>
 
 #define IN_AUDIO_WORKER 1   // called from the audio worker loop on core1
 #define IN_MAIN_LOOP    2   // called from the main loop on core0
 
 extern int NUM_VOICES;
+
+// Guards raw usb_midi.write() byte streams (SysEx frames vs. note on/off
+// echoes) from interleaving - do_tick() can re-enter mid blocking-write
+// (via tud_task()), so a note trigger during an in-progress SysEx send
+// would otherwise corrupt the byte stream on the wire.
+extern std::atomic<bool> g_usbmidi_tx_busy;
 
 struct voice_t {
     int16_t sample;   // index of the sample structure in sampledefs.h
