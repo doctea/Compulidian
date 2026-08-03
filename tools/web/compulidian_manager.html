@@ -244,7 +244,7 @@ function noteSelectHtml(idx, val) {
   const opts = Object.entries(GM_PERC).map(([n, name]) =>
     `<option value="${n}"${parseInt(n)===val?' selected':''}>${n} \u2014 ${name}</option>`
   ).join('');
-  return `<select onchange="samples[${idx}].midiNote=parseInt(this.value)" style="font-size:.75rem;width:150px">${opts}</select>`;
+  return `<select onchange="setSampleField(${idx}, 'midiNote', parseInt(this.value))" style="font-size:.75rem;width:150px">${opts}</select>`;
 }
 
 // Heuristic: map filename keywords to GM note numbers.
@@ -299,6 +299,7 @@ const UF2_MAGIC_START0 = 0x0A324655;
 const UF2_MAGIC_START1 = 0x9E5D5157;
 const UF2_MAGIC_END    = 0x0AB16F30;
 const RP2040_FAMILY_ID = 0xE48BFF56;
+const FLASH_READ_TIMEOUT_MS = 15000;
 
 function makeUf2Block(addr, data, blockIdx, totalBlocks) {
   const buf = new ArrayBuffer(UF2_BLOCK_SIZE);
@@ -326,6 +327,71 @@ function binaryToUf2(data, baseAddr) {
   for (let i = 0; i < total; i++) {
     const chunk = padded.slice(i * UF2_DATA_SIZE, (i + 1) * UF2_DATA_SIZE);
     out.set(makeUf2Block(baseAddr + i * UF2_DATA_SIZE, chunk, i, total), i * UF2_BLOCK_SIZE);
+  }
+  return out;
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+async function flashReadWithFallback(pico, addr, size, label) {
+  try {
+    const data = await withTimeout(
+      pico.flashRead(addr, size),
+      FLASH_READ_TIMEOUT_MS,
+      label
+    );
+    return new Uint8Array(data);
+  } catch (primaryErr) {
+    const msg = (primaryErr && primaryErr.message) ? primaryErr.message : String(primaryErr);
+    const looksLikeReadHang = msg.includes('timed out') || msg.includes('Error from device');
+    if (!looksLikeReadHang) throw primaryErr;
+
+    // Fallback path: use a direct connection read and explicitly enter XIP.
+    // Some stacks/devices do not like READ after an unconditional EXIT_XIP.
+    const wasConnected = pico.isConnected();
+    try {
+      await pico.connect();
+      const conn = pico.getConnection();
+      await conn.resetInterface();
+      try { await conn.enterXip(); } catch (_) { /* best effort */ }
+      const data = await withTimeout(
+        conn.flashRead(addr, size),
+        FLASH_READ_TIMEOUT_MS,
+        `${label} (direct)`
+      );
+      return new Uint8Array(data);
+    } finally {
+      if (!wasConnected) {
+        try { await pico.disconnect(); } catch (_) { /* ignore close errors */ }
+      }
+    }
+  }
+}
+
+async function flashReadChunked(pico, addr, size, label = 'Flash read', onProgress = null) {
+  const out = new Uint8Array(size);
+  // Small reads are more reliable across browser/USB stacks than single large transfers.
+  const CHUNK = 0x1000;
+  for (let off = 0; off < size; off += CHUNK) {
+    const read = Math.min(CHUNK, size - off);
+    const chunk = await flashReadWithFallback(
+      pico,
+      addr + off,
+      read,
+      `${label} @+0x${off.toString(16)}`
+    );
+    out.set(chunk, off);
+    if (onProgress) onProgress(off + read, size);
   }
   return out;
 }
@@ -440,10 +506,10 @@ function updateSampleTable() {
     const tr  = document.createElement('tr');
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td class="name-cell"><input value="${s.name}" onchange="samples[${i}].name=this.value"></td>
+      <td class="name-cell"><input value="${s.name}" onchange="setSampleField(${i}, 'name', this.value)"></td>
       <td>${noteSelectHtml(i, s.midiNote)}</td>
       <td><input type="number" min="0" max="127" value="${s.volume}" style="width:56px"
-           onchange="samples[${i}].volume=parseInt(this.value)"></td>
+           onchange="setSampleField(${i}, 'volume', parseInt(this.value))"></td>
       <td>${dur}</td>
       <td>${kb}</td>
       <td><button class="btn" style="padding:.2rem .6rem" onclick="removeSample(${i})">✕</button></td>`;
@@ -453,6 +519,7 @@ function updateSampleTable() {
 }
 
 function removeSample(i) { samples.splice(i, 1); updateSampleTable(); }
+function setSampleField(i, field, value) { samples[i][field] = value; }
 
 function updateBudget() {
   const flashMB  = parseInt(document.getElementById('flash-size').value);
@@ -496,6 +563,7 @@ async function handleFileInput(fileList) {
 window.handleDrop = handleDrop;
 window.handleFileInput = handleFileInput;
 window.removeSample = removeSample;
+window.setSampleField = setSampleField;
 
 // ============================================================================
 // Flash slot options
@@ -588,33 +656,56 @@ async function downloadUF2() {
 }
 window.downloadUF2 = downloadUF2;
 
-async function readFromDevice() {
+async function readFromDevice(forceFlashMode = false) {
   const flashMB = parseInt(document.getElementById('flash-size').value);
   const slot    = parseInt(document.getElementById('bank-slot').value);
   const addr    = bankXipAddr(slot, flashMB);
+  const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
 
-  // Same reboot flow as flashToDevice
-  if (midiOutput) {
-    setStatus('Sending reboot-to-flash command via MIDI…');
-    sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
-    setStatus('Waiting for device to enter flash mode (2.5 s)…');
-    await new Promise(r => setTimeout(r, 2500));
+  // Default path: runtime read over MIDI SysEx (no reboot to flash mode).
+  if (!forceFlashMode) {
+    if (!midiOutput) {
+      setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI on the Configuration tab first.', true);
+      return;
+    }
+    try {
+      await readBankViaMidiRuntime(slot);
+      setStatus(`✓ Read bank ${slot} via MIDI runtime`, false, true);
+      return;
+    } catch (e) {
+      setStatus(`Runtime MIDI read failed: ${e.message}`, true);
+      return;
+    }
   }
 
-  setStatus('Select the Compulidian / RP2040 device in the popup…');
+  if (bankSize <= 0) {
+    setStatus('This flash size has no user bank area to read from.', true);
+    return;
+  }
+
+  // Reading sample bank bytes requires picoboot/BOOTSEL mode, but this button
+  // should not force a reboot out of normal operation.
+  setStatus('Select the Compulidian / RP2040 device in flash mode (BOOTSEL) to read bank data…');
   let pico;
   try { pico = await Picoboot.requestDevice(); }
-  catch(e) { setStatus('Device not found: ' + e.message, true); return; }
+  catch(e) {
+    setStatus('Device not found in flash mode. Use Reboot to Flash Mode first, then try Read from Device again.', true);
+    return;
+  }
 
   try {
     // Read header first to find out total PCM size
     setStatus(`Reading bank header from slot ${slot}…`);
-    const rawHdr = new Uint8Array(await pico.flashRead(addr, BANK_HEADER_SIZE));
+    const rawHdr = await flashReadChunked(pico, addr, BANK_HEADER_SIZE, 'Header read');
     const dv     = new DataView(rawHdr.buffer);
     if (dv.getUint32(0, true) !== BANK_MAGIC) {
       setStatus(`Slot ${slot} is empty (magic 0x${dv.getUint32(0,true).toString(16)}).`); return;
     }
     const numSamples = dv.getUint32(8, true);
+    if (numSamples > MAX_SAMPLES) {
+      setStatus(`Header looks invalid: sample count ${numSamples} exceeds max ${MAX_SAMPLES}.`, true);
+      return;
+    }
     // Calculate total PCM bytes from the last entry
     let pcmBytes = 0;
     for (let i = 0; i < numSamples && i < MAX_SAMPLES; i++) {
@@ -623,16 +714,22 @@ async function readFromDevice() {
       const n   = dv.getUint32(eo + 4, true);
       pcmBytes  = Math.max(pcmBytes, off + n * 2);
     }
+    if (pcmBytes > bankSize - BANK_HEADER_SIZE) {
+      setStatus(`Header looks invalid: PCM size ${(pcmBytes / 1024).toFixed(0)} KB exceeds bank capacity.`, true);
+      return;
+    }
+    showProgress(0);
+
     // Read PCM data in chunks (picoboot reads up to ~64 KB at a time reliably)
     setStatus(`Reading ${numSamples} samples (${(pcmBytes/1024).toFixed(0)} KB PCM)…`);
-    const pcmRaw  = new Uint8Array(pcmBytes);
-    const CHUNK   = 0x8000; // 32 KB
-    for (let off = 0; off < pcmBytes; off += CHUNK) {
-      const read = Math.min(CHUNK, pcmBytes - off);
-      showProgress(off / pcmBytes);
-      const chunk = new Uint8Array(await pico.flashRead(addr + BANK_HEADER_SIZE + off, read));
-      pcmRaw.set(chunk, off);
-    }
+    const pcmRaw = await flashReadChunked(
+      pico,
+      addr + BANK_HEADER_SIZE,
+      pcmBytes,
+      'PCM read',
+      (done, total) => showProgress(done / total)
+    );
+    showProgress(1);
     hideProgress();
 
     // Assemble header + PCM and reuse the UF2-bank parser
@@ -640,10 +737,23 @@ async function readFromDevice() {
     full.set(rawHdr, 0); full.set(pcmRaw, BANK_HEADER_SIZE);
     await parseBankBinary(full, addr);
   } catch(e) {
-    hideProgress(); setStatus('Read failed: ' + e.message, true);
+    hideProgress();
+    // Helpful diagnostic: if reading flash base works, the selected bank layout
+    // is likely wrong for this hardware/firmware combination.
+    if ((e && e.message || '').includes('Header read')) {
+      try {
+        await flashReadChunked(pico, XIP_BASE, 256, 'Probe read');
+        setStatus('Read failed at bank address. Device responds, so selected flash size/slot likely does not match hardware layout.', true);
+        return;
+      } catch (_) {
+        // fall through to generic error
+      }
+    }
+    setStatus('Read failed: ' + e.message, true);
   }
 }
 window.readFromDevice = readFromDevice;
+window.readFromDeviceFlash = () => readFromDevice(true);
 
 async function rebootToBootloader() {
   // Try via SysEx first (device stays running), fall back to manual instruction.
@@ -664,6 +774,86 @@ function handleUF2Input(fileList) {
   loadUF2Bank(fileList[0]);
 }
 window.handleUF2Input = handleUF2Input;
+
+async function parseBankBinary(binary, baseAddr = null) {
+  if (!(binary instanceof Uint8Array)) {
+    binary = new Uint8Array(binary);
+  }
+  if (binary.length < BANK_HEADER_SIZE) {
+    throw new Error(`Bank data too short (${binary.length} bytes)`);
+  }
+
+  const dv = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
+  const magic = dv.getUint32(0, true);
+  if (magic !== BANK_MAGIC) {
+    throw new Error(`Not a Compulidian bank (magic 0x${magic.toString(16).padStart(8, '0')})`);
+  }
+
+  const numSamples = dv.getUint32(8, true);
+  if (numSamples > MAX_SAMPLES) {
+    throw new Error(`Invalid sample count ${numSamples} (max ${MAX_SAMPLES})`);
+  }
+
+  const dec      = new TextDecoder();
+  const bankName = dec.decode(binary.slice(16, 48)).replace(/\0/g, '').trim();
+
+  // Auto-select slot/flash size when the source carries a meaningful base address.
+  if (typeof baseAddr === 'number') {
+    const bankOffset = baseAddr - XIP_BASE - FLASH_BANKS_OFFSET;
+    if (bankOffset >= 0 && FLASH_BANK_SIZE_16MB > 0) {
+      const slot = Math.round(bankOffset / FLASH_BANK_SIZE_16MB) + 1;
+      if (slot >= 1 && slot <= 4) {
+        document.getElementById('flash-size').value = '16';
+        updateSlotOptions();
+        document.getElementById('bank-slot').value = String(slot);
+      }
+    }
+  }
+
+  if (bankName) {
+    document.getElementById('bank-name').value = bankName;
+  }
+
+  const parsedSamples = [];
+  for (let i = 0; i < numSamples; i++) {
+    const eo        = 48 + i * BANK_ENTRY_SIZE;
+    const pcmOff    = dv.getUint32(eo, true);
+    const numS      = dv.getUint32(eo + 4, true);
+    const sRate     = dv.getUint32(eo + 8, true);
+    const bitDepth  = dv.getUint8(eo + 12);
+    const midiNote  = dv.getUint8(eo + 13);
+    const volume    = dv.getUint8(eo + 14);
+    const entryName = dec.decode(binary.slice(eo + 16, eo + 40)).replace(/\0/g, '').trim();
+    const absOff    = BANK_HEADER_SIZE + pcmOff;
+    const absEnd    = absOff + numS * 2;
+
+    if (bitDepth !== 16) {
+      throw new Error(`Unsupported bit depth ${bitDepth} in sample ${i + 1}`);
+    }
+    if (absEnd > binary.length) {
+      throw new Error(`Sample ${i + 1} exceeds bank payload size`);
+    }
+
+    // Copy sample bytes to a standalone buffer before viewing as Int16.
+    const pcmSlice  = binary.slice(absOff, absEnd);
+    const int16Data = new Int16Array(pcmSlice.buffer);
+    parsedSamples.push({
+      name: entryName || `Sample ${i + 1}`,
+      midiNote,
+      volume,
+      rate: sRate,
+      int16Data,
+    });
+  }
+
+  samples = parsedSamples;
+  updateSampleTable();
+
+  const addrTag = typeof baseAddr === 'number'
+    ? ` from 0x${baseAddr.toString(16).toUpperCase()}`
+    : '';
+  setStatus(`✓ Loaded "${bankName || 'Bank'}" — ${parsedSamples.length} sample(s)${addrTag}`, false, true);
+}
 
 async function loadUF2Bank(file) {
   setStatus(`Parsing ${file.name}…`);
@@ -692,48 +882,7 @@ async function loadUF2Bank(file) {
     binary.fill(0);
     for (const [addr, data] of pages) binary.set(data, addr - baseAddr);
 
-    // Validate bank header
-    const dv = new DataView(binary.buffer);
-    const magic = dv.getUint32(0, true);
-    if (magic !== BANK_MAGIC) {
-      setStatus(`Not a Compulidian bank UF2 (magic 0x${magic.toString(16).padStart(8,'0')}, want 0x${BANK_MAGIC.toString(16)})`, true);
-      return;
-    }
-    const numSamples = dv.getUint32(8, true);
-    const dec        = new TextDecoder();
-    const bankName   = dec.decode(binary.slice(16, 48)).replace(/\0/g, '').trim();
-
-    // Auto-select slot / flash-size to match the UF2 target address
-    const bankOffset = baseAddr - XIP_BASE - FLASH_BANKS_OFFSET;
-    if (bankOffset >= 0 && FLASH_BANK_SIZE_16MB > 0) {
-      const slot = Math.round(bankOffset / FLASH_BANK_SIZE_16MB) + 1;
-      if (slot >= 1 && slot <= 4) {
-        document.getElementById('flash-size').value = '16';
-        updateSlotOptions();
-        document.getElementById('bank-slot').value = String(slot);
-      }
-    }
-    document.getElementById('bank-name').value = bankName || file.name.replace(/\.uf2$/i,'');
-
-    // Parse entries and extract PCM
-    samples = [];
-    for (let i = 0; i < numSamples && i < MAX_SAMPLES; i++) {
-      const eo        = 48 + i * BANK_ENTRY_SIZE;
-      const pcmOff    = dv.getUint32(eo,     true);
-      const numS      = dv.getUint32(eo + 4, true);
-      const sRate     = dv.getUint32(eo + 8, true);
-      const midiNote  = dv.getUint8(eo + 13);
-      const volume    = dv.getUint8(eo + 14);
-      const entryName = dec.decode(binary.slice(eo + 16, eo + 40)).replace(/\0/g, '').trim();
-      const absOff    = BANK_HEADER_SIZE + pcmOff;
-      // Copy the int16 data (slice so it has its own ArrayBuffer)
-      const pcmSlice  = binary.slice(absOff, absOff + numS * 2);
-      const int16Data = new Int16Array(pcmSlice.buffer);
-      samples.push({ name: entryName || `Sample ${i+1}`, midiNote, volume, rate: sRate, int16Data });
-    }
-
-    setStatus(`\u2713 Loaded "${bankName}" \u2014 ${numSamples} sample(s) from 0x${baseAddr.toString(16).toUpperCase()}`, false, true);
-    updateSampleTable();
+    await parseBankBinary(binary, baseAddr);
   } catch(e) {
     setStatus('UF2 parse error: ' + e.message, true);
   }
@@ -801,8 +950,12 @@ const SYSEX_PROTO_VER = 0x02;
 
 const SYSEX_TYPE_GET_CONFIG_REQ = 0x10;
 const SYSEX_TYPE_SET_CONFIG_REQ = 0x11;
+const SYSEX_TYPE_GET_BANK_INFO_REQ = 0x12;
+const SYSEX_TYPE_GET_BANK_CHUNK_REQ = 0x13;
 const SYSEX_TYPE_REBOOT_REQ     = 0x20;
 const SYSEX_TYPE_CONFIG_RESP    = 0x30;
+const SYSEX_TYPE_BANK_INFO_RESP = 0x40;
+const SYSEX_TYPE_BANK_CHUNK_RESP = 0x41;
 const SYSEX_TYPE_ACK            = 0x31;
 const SYSEX_TYPE_NACK           = 0x32;
 
@@ -830,6 +983,7 @@ let midiConnectionWatchdog = null;
 
 const MIDI_REQUEST_TIMEOUT_MS = 1500;
 const MIDI_MAX_RETRIES = 2;
+const MIDI_BANK_CHUNK_TIMEOUT_MS = 5000;
 const MIDI_RECONNECT_MAX_ATTEMPTS = 8;
 const MIDI_RECONNECT_BASE_DELAY_MS = 400;
 const MIDI_WATCHDOG_INTERVAL_MS = 800;
@@ -1075,6 +1229,99 @@ function sendCompulidianSysexFrame(type, reqId = 0, status = 0, payload = []) {
     status & 0x7F,
     ...payload
   ]);
+}
+
+function decodeU32_7bit(bytes, offset) {
+  if (!bytes || bytes.length < offset + 5) throw new Error('u32 decode underrun');
+  return ((bytes[offset] & 0x7F)
+    | ((bytes[offset + 1] & 0x7F) << 7)
+    | ((bytes[offset + 2] & 0x7F) << 14)
+    | ((bytes[offset + 3] & 0x7F) << 21)
+    | ((bytes[offset + 4] & 0x0F) << 28)) >>> 0;
+}
+
+function hexNibble(c) {
+  if (c >= 0x30 && c <= 0x39) return c - 0x30; // 0-9
+  if (c >= 0x41 && c <= 0x46) return c - 0x41 + 10; // A-F
+  if (c >= 0x61 && c <= 0x66) return c - 0x61 + 10; // a-f
+  throw new Error(`Invalid hex nibble 0x${c.toString(16)}`);
+}
+
+async function readBankViaMidiRuntime(slot) {
+  if (!midiOutput) throw new Error('Not connected via MIDI');
+
+  setStatus(`Requesting bank ${slot} info via MIDI…`);
+  const info = await requestSysexResponse(
+    SYSEX_TYPE_GET_BANK_INFO_REQ,
+    [slot & 0x7F],
+    [SYSEX_TYPE_BANK_INFO_RESP],
+    MIDI_BANK_CHUNK_TIMEOUT_MS,
+    MIDI_MAX_RETRIES
+  );
+
+  const p = info.payload || [];
+  if (p.length < 12) throw new Error(`Short bank info response (${p.length} bytes)`);
+  if ((p[0] & 0x7F) !== (slot & 0x7F)) throw new Error('Bank info slot mismatch');
+
+  const numSamples = p[1] & 0x7F;
+  const pcmBytes   = decodeU32_7bit(p, 2);
+  const totalBytes = decodeU32_7bit(p, 7);
+  if (totalBytes < BANK_HEADER_SIZE) throw new Error(`Invalid bank size ${totalBytes}`);
+
+  setStatus(`Reading ${numSamples} sample(s) over MIDI (${(pcmBytes / 1024).toFixed(0)} KB PCM)…`);
+  showProgress(0);
+
+  const full = new Uint8Array(totalBytes);
+  let offset = 0;
+  let chunkIdx = 0;
+
+  while (offset < totalBytes) {
+    const idxLo = chunkIdx & 0x7F;
+    const idxHi = (chunkIdx >> 7) & 0x7F;
+    const resp = await requestSysexResponse(
+      SYSEX_TYPE_GET_BANK_CHUNK_REQ,
+      [slot & 0x7F, idxLo, idxHi],
+      [SYSEX_TYPE_BANK_CHUNK_RESP],
+      MIDI_BANK_CHUNK_TIMEOUT_MS,
+      MIDI_MAX_RETRIES
+    );
+
+    const c = resp.payload || [];
+    if (c.length < 6) throw new Error(`Short bank chunk response (${c.length} bytes)`);
+    const gotSlot = c[0] & 0x7F;
+    const gotIdx  = (c[1] & 0x7F) | ((c[2] & 0x7F) << 7);
+    const rawLen  = (c[3] & 0x7F) | ((c[4] & 0x7F) << 7);
+    const isLast  = (c[5] & 0x7F) !== 0;
+    const hexLen  = rawLen * 2;
+
+    if (gotSlot !== (slot & 0x7F)) throw new Error('Bank chunk slot mismatch');
+    if (gotIdx !== chunkIdx) throw new Error(`Bank chunk index mismatch (got ${gotIdx}, expected ${chunkIdx})`);
+    if (c.length < 6 + hexLen) throw new Error('Bank chunk hex payload truncated');
+    if (offset + rawLen > full.length) throw new Error('Bank chunk exceeds expected bank size');
+
+    for (let i = 0; i < rawLen; i++) {
+      const hi = hexNibble(c[6 + i * 2]);
+      const lo = hexNibble(c[6 + i * 2 + 1]);
+      full[offset + i] = (hi << 4) | lo;
+    }
+
+    offset += rawLen;
+    chunkIdx++;
+    showProgress(offset / totalBytes);
+
+    if (isLast) break;
+  }
+
+  showProgress(1);
+  hideProgress();
+
+  if (offset < BANK_HEADER_SIZE) {
+    throw new Error(`Incomplete bank data (${offset} bytes)`);
+  }
+
+  const binary = (offset === full.length) ? full : full.slice(0, offset);
+  const flashMB = parseInt(document.getElementById('flash-size').value);
+  await parseBankBinary(binary, bankXipAddr(slot, flashMB));
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,6 +1577,7 @@ async function readConfig() {
     setConfigStatus('Not connected.', true, false);
     throw new Error('Not connected');
   }
+  setConfigStatus('Requesting config…', false, false);
   await requestSysexResponse(
     SYSEX_TYPE_GET_CONFIG_REQ,
     [],
@@ -1337,6 +1585,7 @@ async function readConfig() {
   );
 }
 window.readConfig = () => readConfig().catch(e => {
+  setConfigStatus('Config read failed: ' + e.message, true, false);
   console.warn('readConfig failed:', e);
 });
 

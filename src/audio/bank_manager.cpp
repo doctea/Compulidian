@@ -70,6 +70,7 @@ bool BankManager::switch_bank(int n) {
 
     // Give the audio worker time to finish any in-progress buffer fill.
     // At 48 kHz with a 128-sample buffer each fill takes ~2.7 ms.
+    // @@TODO: Use a semaphore or flag to wait for the audio ISR to finish instead of a fixed delay.
     delay(6);
 
     bool ok;
@@ -117,14 +118,20 @@ void BankManager::init_compiled_bank_() {
 
 void BankManager::cache_compiled_bank_() {
     for (int i = 0; i < NUM_VOICES && i < MAX_SAMPLES_PER_BANK; ++i) {
-        compiled_cache_[i] = sample_data[voice[i].sample];
+        int si = voice[i].sample;
+        compiled_cache_[i]    = sample_data[si];
+        compiled_midinote_[i] = sample[si].MIDINOTE;
+        compiled_volume_[i]   = sample[si].play_volume;
     }
 }
 
 void BankManager::restore_compiled_bank_() {
     release_flash_pool_();
     for (int i = 0; i < (int)compiled_num_voices_ && i < MAX_SAMPLES_PER_BANK; ++i) {
-        sample_data[voice[i].sample] = compiled_cache_[i];
+        int si = voice[i].sample;
+        sample_data[si] = compiled_cache_[i];
+        sample[si].MIDINOTE    = compiled_midinote_[i];
+        sample[si].play_volume = compiled_volume_[i];
         // Silence the voice so it re-starts cleanly.
         voice[i].sampleindex = compiled_cache_[i]
             ? (uint32_t)compiled_cache_[i]->size() << 12
@@ -187,6 +194,14 @@ bool BankManager::load_flash_bank_(int slot) {
 
         int si = voice[i].sample; // voice i plays sample slot si
         sample_data[si] = &flash_pool_[flash_pool_count_];
+
+        // Match this bank's own note/volume/name assignments, not the
+        // compiled-in bank's - otherwise get_voice_number_for_note() keeps
+        // matching against stale MIDINOTE values from the previous bank.
+        sample[si].MIDINOTE    = e.midi_note;
+        sample[si].play_volume = e.volume;
+        strncpy(sample[si].sname, e.name, sizeof(sample[si].sname) - 1);
+        sample[si].sname[sizeof(sample[si].sname) - 1] = '\0';
 
         // Silence the voice so playback can be triggered freshly.
         voice[i].sampleindex = (uint32_t)e.num_samples << 12;

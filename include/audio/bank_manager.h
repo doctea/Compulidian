@@ -103,6 +103,10 @@ private:
 
     // Cached compiled-in BaseSampleData pointers (so they can be restored).
     BaseSampleData* compiled_cache_[MAX_SAMPLES_PER_BANK] = {};
+    // Cached compiled-in sample[] metadata, so switching back to bank 0
+    // restores the original note/volume/name rather than a flash bank's.
+    uint8_t         compiled_midinote_[MAX_SAMPLES_PER_BANK] = {};
+    uint8_t         compiled_volume_[MAX_SAMPLES_PER_BANK] = {};
     size_t          compiled_num_voices_ = 0;
 
     // Static pool of SampleDataFlash objects — avoids heap allocations after

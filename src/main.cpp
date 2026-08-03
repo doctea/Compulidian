@@ -277,6 +277,12 @@ void __not_in_flash_func(loop)() {
   }
   serial_prev = serial_now;
 
+  #ifdef USE_TINYUSB
+    // Service USB + pending SysEx responses even if config mode is active.
+    tud_task();
+    process_pending_sysex_responses();
+  #endif
+
   if (handle_config_mode()) return;
 
   // todo: will need this if/when we convert the WorkshopOutputWrapper to use the ring buffer that Microlidian now uses
@@ -318,8 +324,6 @@ void __not_in_flash_func(loop)() {
   }
 
   #ifdef USE_TINYUSB
-    tud_task();
-    process_pending_sysex_responses();
     //if (ticked) 
     //ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
     {

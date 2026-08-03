@@ -39,6 +39,16 @@ export class Picoboot {
             reset: DEFAULT_RESET_TIMEOUT,
         };
         this.connection = null;
+        this.connectPromise = null;
+    }
+
+    /**
+     * @param {any} err
+     * @returns {boolean}
+     */
+    static isInterfaceStateBusyError(err) {
+        const msg = (err && err.message) ? String(err.message).toLowerCase() : '';
+        return msg.includes('interface state is in progress') || msg.includes('operation is in progress');
     }
 
     /**
@@ -211,62 +221,95 @@ export class Picoboot {
             console.log('Already connected, returning existing connection');
             return this.connection;
         }
-        
-        console.log(`Connecting to ${this.target.toString()}`);
-        
-        if (!this.device.opened) {
-            try {
-                await this.device.open();
-                console.log('Device opened');
-            } catch (e) {
-                throw new UsbError(
-                    `Failed to open device: ${e.message}`,
-                    this.target,
-                    e
-                );
-            }
-        }
-        
-        try {
-            await this.device.selectConfiguration(1);
-            console.log('Configuration selected');
-        } catch (e) {
-            throw new UsbError(
-                `Failed to select configuration: ${e.message}`,
-                this.target,
-                e
-            );
-        }
-        
-        try {
-            await this.device.claimInterface(this.ifNum);
-            console.log(`Interface ${this.ifNum} claimed`);
-        } catch (e) {
-            throw new UsbError(
-                `Failed to claim interface: ${e.message}`,
-                this.target,
-                e
-            );
-        }
-        
-        const usbInterface = this.device.configuration.interfaces.find(
-            iface => iface.interfaceNumber === this.ifNum
-        );
-        
-        this.connection = new Connection(
-            this.device,
-            this.target,
-            usbInterface,
-            this.outEp,
-            this.inEp,
-            this.inEpMaxPacketSize,
-            this.timeouts
-        );
 
-        await this.connection.resetInterface(true);
-        
-        console.log('Connection established');
-        return this.connection;
+        if (this.connectPromise) {
+            console.log('Connection already in progress, waiting for existing attempt');
+            return await this.connectPromise;
+        }
+
+        this.connectPromise = (async () => {
+            console.log(`Connecting to ${this.target.toString()}`);
+            
+            if (!this.device.opened) {
+                try {
+                    await this.device.open();
+                    console.log('Device opened');
+                } catch (e) {
+                    throw new UsbError(
+                        `Failed to open device: ${e.message}`,
+                        this.target,
+                        e
+                    );
+                }
+            }
+            
+            // Some browser stacks briefly report "interface state is in progress"
+            // during rapid reconnects. Retry a few times before failing.
+            for (let attempt = 0; attempt < 5; attempt++) {
+                try {
+                    if (!this.device.configuration || this.device.configuration.configurationValue !== 1) {
+                        await this.device.selectConfiguration(1);
+                        console.log('Configuration selected');
+                    } else {
+                        console.log('Configuration already selected');
+                    }
+                    break;
+                } catch (e) {
+                    if (attempt < 4 && Picoboot.isInterfaceStateBusyError(e)) {
+                        await new Promise(r => setTimeout(r, 120));
+                        continue;
+                    }
+                    throw new UsbError(
+                        `Failed to select configuration: ${e.message}`,
+                        this.target,
+                        e
+                    );
+                }
+            }
+            
+            for (let attempt = 0; attempt < 5; attempt++) {
+                try {
+                    await this.device.claimInterface(this.ifNum);
+                    console.log(`Interface ${this.ifNum} claimed`);
+                    break;
+                } catch (e) {
+                    if (attempt < 4 && Picoboot.isInterfaceStateBusyError(e)) {
+                        await new Promise(r => setTimeout(r, 120));
+                        continue;
+                    }
+                    throw new UsbError(
+                        `Failed to claim interface: ${e.message}`,
+                        this.target,
+                        e
+                    );
+                }
+            }
+            
+            const usbInterface = this.device.configuration.interfaces.find(
+                iface => iface.interfaceNumber === this.ifNum
+            );
+            
+            this.connection = new Connection(
+                this.device,
+                this.target,
+                usbInterface,
+                this.outEp,
+                this.inEp,
+                this.inEpMaxPacketSize,
+                this.timeouts
+            );
+
+            await this.connection.resetInterface(true);
+            
+            console.log('Connection established');
+            return this.connection;
+        })();
+
+        try {
+            return await this.connectPromise;
+        } finally {
+            this.connectPromise = null;
+        }
     }
 
     /**

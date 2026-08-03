@@ -18,9 +18,13 @@
 
 #define SYSEX_TYPE_GET_CONFIG_REQ 0x10
 #define SYSEX_TYPE_SET_CONFIG_REQ 0x11
+#define SYSEX_TYPE_GET_BANK_INFO_REQ 0x12
+#define SYSEX_TYPE_GET_BANK_CHUNK_REQ 0x13
 #define SYSEX_TYPE_REBOOT_REQ     0x20
 
 #define SYSEX_TYPE_CONFIG_RESP    0x30
+#define SYSEX_TYPE_BANK_INFO_RESP 0x40
+#define SYSEX_TYPE_BANK_CHUNK_RESP 0x41
 #define SYSEX_TYPE_ACK            0x31
 #define SYSEX_TYPE_NACK           0x32
 
@@ -56,6 +60,12 @@
 // [115..146] bank name for slot 4
 #define SYSEX_DATA_LEN    19
 #define SYSEX_BANK_NAME   32   // bytes per bank name in the SysEx response
+// Raw chunk size must fit in 14 bits (encoded as two 7-bit bytes) - see send_bank_chunk_sysex().
+// Kept moderate (vs. e.g. 1024+) to bound stack usage of the payload buffers below.
+#define SYSEX_BANK_RAW_CHUNK_BYTES 512
+#define SYSEX_BANK_CHUNK_HEX_BYTES (SYSEX_BANK_RAW_CHUNK_BYTES * 2)
+#define SYSEX_BANK_CHUNK_HEADER_BYTES 6
+#define SYSEX_MAX_PAYLOAD (SYSEX_BANK_CHUNK_HEADER_BYTES + SYSEX_BANK_CHUNK_HEX_BYTES)
 
 static Settings current_settings;
 
@@ -65,12 +75,16 @@ enum PendingSysexAction : uint8_t {
     PENDING_SEND_ACK = 2,
     PENDING_SEND_NACK = 3,
     PENDING_REBOOT_BOOTSEL = 4,
+    PENDING_SEND_BANK_INFO = 5,
+    PENDING_SEND_BANK_CHUNK = 6,
 };
 
 struct PendingSysexItem {
     uint8_t action;
     uint8_t req_id;
     uint8_t arg;
+    uint8_t arg2;
+    uint8_t arg3;
 };
 
 static volatile uint8_t pending_sysex_head = 0;
@@ -78,8 +92,10 @@ static volatile uint8_t pending_sysex_tail = 0;
 static PendingSysexItem pending_sysex_queue[8];
 
 static void send_config_sysex(uint8_t req_id = 0);
+static void send_bank_info_sysex(uint8_t req_id, uint8_t slot);
+static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_idx);
 
-static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 0) {
+static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 0, uint8_t arg2 = 0, uint8_t arg3 = 0) {
     noInterrupts();
     const uint8_t next_head = (uint8_t)((pending_sysex_head + 1) % (sizeof(pending_sysex_queue) / sizeof(pending_sysex_queue[0])));
     if (next_head == pending_sysex_tail) {
@@ -90,6 +106,8 @@ static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 
     pending_sysex_queue[pending_sysex_head].action = action;
     pending_sysex_queue[pending_sysex_head].req_id = req_id;
     pending_sysex_queue[pending_sysex_head].arg = arg;
+    pending_sysex_queue[pending_sysex_head].arg2 = arg2;
+    pending_sysex_queue[pending_sysex_head].arg3 = arg3;
     pending_sysex_head = next_head;
     interrupts();
     return true;
@@ -108,6 +126,28 @@ static bool dequeue_pending_sysex(PendingSysexItem *out) {
     return true;
 }
 
+// The TinyUSB MIDI TX FIFO is only CFG_TUD_MIDI_TX_BUFSIZE bytes (64 on RP2040).
+// USBMIDI.sendSysEx()/mTransport.write() ignore the write() return value, so once
+// the FIFO fills mid-message, remaining bytes are silently dropped rather than
+// queued or retried - corrupting/truncating any sysex frame bigger than ~60 bytes.
+// Write bytes ourselves with backpressure (retry + tud_task() to drain) instead.
+static bool midi_write_byte_blocking_(uint8_t b, uint32_t start_ms) {
+    while (usb_midi.write(b) != 1) {
+        tud_task();
+        if ((millis() - start_ms) > 2000) return false; // host likely gone; don't hang forever
+    }
+    return true;
+}
+
+static bool send_sysex_bytes_reliable_(const uint8_t *data, size_t len) {
+    const uint32_t start_ms = millis();
+    if (!midi_write_byte_blocking_(0xF0, start_ms)) return false;
+    for (size_t i = 0; i < len; ++i) {
+        if (!midi_write_byte_blocking_(data[i], start_ms)) return false;
+    }
+    return midi_write_byte_blocking_(0xF7, start_ms);
+}
+
 static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const uint8_t *payload, uint16_t payload_len) {
     // On first browser connect, MIDI can become usable slightly before mounted()
     // stabilizes. Wait briefly, but do not hard-drop the frame if it still reads false.
@@ -121,7 +161,7 @@ static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const
         }
     }
 
-    uint8_t buf[SYSEX_FRAME_BYTES + SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME];
+    uint8_t buf[SYSEX_FRAME_BYTES + SYSEX_MAX_PAYLOAD];
     if (payload_len > sizeof(buf) - SYSEX_FRAME_BYTES) {
         if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): payload too large");
         return false;
@@ -142,7 +182,10 @@ static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const
         Serial.printf("sysex tx: type=0x%02X req=%u status=0x%02X payload=%u\n",
             type, req_id, status, payload_len);
     }
-    USBMIDI.sendSysEx(SYSEX_FRAME_BYTES + payload_len, buf, false);
+    if (!send_sysex_bytes_reliable_(buf, SYSEX_FRAME_BYTES + payload_len)) {
+        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB write timed out (FIFO congested)");
+        return false;
+    }
     return true;
 }
 
@@ -172,11 +215,114 @@ static void process_pending_sysex_responses() {
                 delay(10);
                 rp2040.rebootToBootloader();
                 break;
+            case PENDING_SEND_BANK_INFO:
+                send_bank_info_sysex(item.req_id, item.arg);
+                break;
+            case PENDING_SEND_BANK_CHUNK: {
+                const uint16_t idx = (uint16_t)item.arg2 | ((uint16_t)item.arg3 << 7);
+                send_bank_chunk_sysex(item.req_id, item.arg, idx);
+                break;
+            }
             default:
                 break;
         }
         processed++;
     }
+}
+
+static uint32_t compute_bank_pcm_bytes_(const BankHeader *hdr) {
+    if (!hdr) return 0;
+    uint32_t n = hdr->num_samples;
+    if (n > MAX_SAMPLES_PER_BANK) n = MAX_SAMPLES_PER_BANK;
+    uint32_t pcm_bytes = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+        const BankEntryHeader &e = hdr->entries[i];
+        uint32_t end = e.offset + e.num_samples * 2u;
+        if (end > pcm_bytes) pcm_bytes = end;
+    }
+    return pcm_bytes;
+}
+
+static inline uint8_t to_hex_nibble_(uint8_t v) {
+    v &= 0x0F;
+    return (v < 10) ? (uint8_t)('0' + v) : (uint8_t)('A' + (v - 10));
+}
+
+static void put_u32_7bit_(uint8_t *dst, uint32_t v) {
+    // 35-bit container for 32-bit values, little-endian 7-bit groups.
+    dst[0] = (uint8_t)(v & 0x7F);
+    dst[1] = (uint8_t)((v >> 7) & 0x7F);
+    dst[2] = (uint8_t)((v >> 14) & 0x7F);
+    dst[3] = (uint8_t)((v >> 21) & 0x7F);
+    dst[4] = (uint8_t)((v >> 28) & 0x0F);
+}
+
+static void send_bank_info_sysex(uint8_t req_id, uint8_t slot) {
+    if (slot < 1 || slot > FLASH_MAX_BANKS || !bankManager.is_bank_valid(slot)) {
+        send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const BankHeader *hdr = bankManager.get_bank_header(slot);
+    if (!hdr) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+
+    const uint32_t pcm_bytes = compute_bank_pcm_bytes_(hdr);
+    const uint32_t total_bytes = BANK_HEADER_SIZE + pcm_bytes;
+
+    uint8_t payload[12];
+    memset(payload, 0, sizeof(payload));
+    payload[0] = slot & 0x7F;
+    payload[1] = (uint8_t)hdr->num_samples & 0x7F;
+    put_u32_7bit_(payload + 2, pcm_bytes);
+    put_u32_7bit_(payload + 7, total_bytes);
+
+    send_sysex_frame(SYSEX_TYPE_BANK_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, sizeof(payload));
+}
+
+static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_idx) {
+    if (slot < 1 || slot > FLASH_MAX_BANKS || !bankManager.is_bank_valid(slot)) {
+        send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const BankHeader *hdr = bankManager.get_bank_header(slot);
+    if (!hdr) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+
+    const uint32_t pcm_bytes = compute_bank_pcm_bytes_(hdr);
+    const uint32_t total_bytes = BANK_HEADER_SIZE + pcm_bytes;
+    const uint32_t offset = (uint32_t)chunk_idx * SYSEX_BANK_RAW_CHUNK_BYTES;
+    if (offset >= total_bytes) {
+        send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const uint32_t remaining = total_bytes - offset;
+    const uint16_t raw_len = (uint16_t)((remaining >= SYSEX_BANK_RAW_CHUNK_BYTES) ? SYSEX_BANK_RAW_CHUNK_BYTES : remaining);
+    const bool is_last = (offset + raw_len) >= total_bytes;
+
+    const uint8_t *src = reinterpret_cast<const uint8_t*>(flash_bank_xip_addr(slot)) + offset;
+
+    uint8_t payload[SYSEX_BANK_CHUNK_HEADER_BYTES + SYSEX_BANK_CHUNK_HEX_BYTES];
+    payload[0] = slot & 0x7F;
+    payload[1] = (uint8_t)(chunk_idx & 0x7F);
+    payload[2] = (uint8_t)((chunk_idx >> 7) & 0x7F);
+    payload[3] = (uint8_t)(raw_len & 0x7F);
+    payload[4] = (uint8_t)((raw_len >> 7) & 0x7F);
+    payload[5] = is_last ? 1 : 0;
+
+    for (uint16_t i = 0; i < raw_len; ++i) {
+        const uint8_t b = src[i];
+        payload[SYSEX_BANK_CHUNK_HEADER_BYTES + i * 2] = to_hex_nibble_(b >> 4);
+        payload[SYSEX_BANK_CHUNK_HEADER_BYTES + i * 2 + 1] = to_hex_nibble_(b);
+    }
+
+    send_sysex_frame(SYSEX_TYPE_BANK_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_BANK_CHUNK_HEADER_BYTES + raw_len * 2));
 }
 
 static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
@@ -228,19 +374,24 @@ static void send_config_sysex(uint8_t req_id) {
 }
 
 static void handle_sysex(uint8_t *data, unsigned int size) {
-    // The MIDI library includes 0xF0 at data[0] and 0xF7 at data[size-1].
-    // Layout: [0xF0, MFR_ID, DEVICE_ID, VER, TYPE, REQ_ID, STATUS, ...payload..., 0xF7]
-    if (size < 8) return;
-    if (data[0] != 0xF0) return;
-    if (data[size - 1] != 0xF7) return;
-    if (data[1] != SYSEX_MFR_ID || data[2] != SYSEX_DEVICE_ID) return;
+    // Accept either callback layout:
+    // 1) framed:   [0xF0, MFR, DEV, VER, TYPE, REQ, STATUS, ...payload..., 0xF7]
+    // 2) unframed: [MFR, DEV, VER, TYPE, REQ, STATUS, ...payload...]
+    if (!data || size < 6) return;
 
-    const uint8_t ver = data[3];
-    const uint8_t type = data[4];
-    const uint8_t req_id = data[5] & 0x7F;
-    const uint8_t payload_status = data[6];
-    const uint8_t *d = data + 7;
-    const unsigned payload_len = size - 8;
+    const bool framed = (size >= 8 && data[0] == 0xF0 && data[size - 1] == 0xF7);
+    const uint8_t *m = framed ? (data + 1) : data;
+    const unsigned mlen = framed ? (size - 2) : size;
+
+    if (mlen < 6) return;
+    if (m[0] != SYSEX_MFR_ID || m[1] != SYSEX_DEVICE_ID) return;
+
+    const uint8_t ver = m[2];
+    const uint8_t type = m[3];
+    const uint8_t req_id = m[4] & 0x7F;
+    const uint8_t payload_status = m[5];
+    const uint8_t *d = m + 6;
+    const unsigned payload_len = mlen - 6;
 
     if (SYSEX_DEBUG && Serial) {
         Serial.printf("sysex rx: ver=0x%02X type=0x%02X req=%u status=0x%02X payload=%u\n",
@@ -258,6 +409,24 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
             return;
         }
         enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);
+
+    } else if (type == SYSEX_TYPE_GET_BANK_INFO_REQ) {
+        if (payload_len != 1) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint8_t slot = d[0] & 0x7F;
+        enqueue_pending_sysex(PENDING_SEND_BANK_INFO, req_id, slot);
+
+    } else if (type == SYSEX_TYPE_GET_BANK_CHUNK_REQ) {
+        if (payload_len != 3) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint8_t slot = d[0] & 0x7F;
+        const uint8_t idx_lo = d[1] & 0x7F;
+        const uint8_t idx_hi = d[2] & 0x7F;
+        enqueue_pending_sysex(PENDING_SEND_BANK_CHUNK, req_id, slot, idx_lo, idx_hi);
 
     } else if (type == SYSEX_TYPE_SET_CONFIG_REQ) {
         if (payload_len < SYSEX_DATA_LEN) {
