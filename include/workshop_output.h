@@ -170,9 +170,11 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
             voice[voice_number].sampleindex = 0;
             if (sw->enable_volume) {
                 // @@TODO: figure out the correct velocity scaling to use here
-                voice[voice_number].level = velocity; //map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
+                // todo: why is velocity getting optimised out apparently?!
+                voice[voice_number].level = velocity; // * 10; //map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
             } else {
                 voice[voice_number].level = 127;
+                // voice[voice_number].level = sample[voice[voice_number].sample].play_volume / 2; // set the velocity for the sample
             }
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         } else {

@@ -64,7 +64,7 @@ class SampleDataFlash : public BaseSampleData {
 
         inline virtual int16_t get_sample(uint32_t index) override {
             if (index < sample_size) {
-                return flash_ptr[index];
+                return flash_ptr[index % sample_size];
             }
             return 0;
         }

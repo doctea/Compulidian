@@ -141,6 +141,9 @@
         <select id="bank-slot" onchange="onBankSlotChanged()"></select>
       </div>
       <div class="col">
+        <button class="btn" id="pull-from-device-btn" onclick="readFromDevice();">⬆ Pull Sample Data from Device</button>
+      </div>
+      <div class="col">
         <label>Flash size</label>
         <select id="flash-size" onchange="updateSlotOptions()">
           <option value="2">2 MB (standard Pico — no user banks)</option>
@@ -193,11 +196,13 @@
     <input type="file" id="replaceInput" accept="audio/*" style="display:none" onchange="handleReplaceInput(this.files)">
 
     <div class="row">
-      <button class="btn primary" onclick="flashToDevice()">⚡ Flash to Device</button>
       <button class="btn" onclick="downloadUF2()">⬇ Download UF2</button>
-      <button class="btn" id="pull-from-device-btn" onclick="readFromDevice()">⬆ Pull Sample Data from Device</button>
       <button class="btn danger" onclick="rebootToBootloader()">↺ Reboot to Flash Mode</button>
     </div>
+    <p style="font-size:.8rem;color:var(--muted);margin:-.5rem 0 1rem">
+      To flash: click Reboot to Flash Mode, wait for the device to appear as a USB drive
+      named <strong>RPI-RP2</strong>, then drag the downloaded .uf2 file onto it.
+    </p>
 
     <div class="section-title">Flash Memory Budget</div>
     <div id="budget-bar-wrap" style="background:var(--surface);border-radius:4px;height:16px;position:relative;overflow:hidden">
@@ -265,11 +270,11 @@ const GM_PERC = {
   43:'Hi Floor Tom',44:'Pedal HH',     45:'Low Tom',     46:'Open HH',
   47:'Lo-Mid Tom',  48:'Hi-Mid Tom',   49:'Crash Cym 1', 50:'High Tom',
   51:'Ride Cym 1',  52:'Chinese Cym',  53:'Ride Bell',   54:'Tambourine',
-  55:'Splash Cym',  56:'Cowbell',      57:'Crash Cym 2', 59:'Ride Cym 2',
-  60:'Hi Bongo',    61:'Lo Bongo',     62:'Mute Hi Conga',63:'Open Hi Conga',
-  64:'Lo Conga',    65:'Hi Timbale',   66:'Lo Timbale',  69:'Cabasa',
-  70:'Maracas',     75:'Claves',       76:'Hi Wood Blk', 77:'Lo Wood Blk',
-  80:'Mute Triangle',81:'Open Triangle',
+  55:'Splash Cym',  56:'Cowbell',      57:'Crash Cym 2', 58:'Vibra',
+  59:'Ride Cym 2',  60:'Hi Bongo',     61:'Lo Bongo',    62:'Mute Hi Conga',
+  63:'Open Hi Conga', 64:'Lo Conga',   65:'Hi Timbale',  66:'Lo Timbale',  
+  69:'Cabasa',      70:'Maracas',      75:'Claves',      76:'Hi Wood Blk', 
+  77:'Lo Wood Blk', 80:'Mute Triangle',81:'Open Triangle',
 };
 
 function noteLabel(note, channel) {
@@ -299,7 +304,7 @@ const FILENAME_HINTS = [
   [41, ['lo.floor']],
   [56, ['cowbell','cow_','_cb.']],
   [54, ['tamb']],
-  [75, ['claves']],
+  [75, ['claves','clavs']],
 ];
 
 function guessNoteFromFilename(filename) {
@@ -331,7 +336,6 @@ const UF2_MAGIC_START0 = 0x0A324655;
 const UF2_MAGIC_START1 = 0x9E5D5157;
 const UF2_MAGIC_END    = 0x0AB16F30;
 const RP2040_FAMILY_ID = 0xE48BFF56;
-const FLASH_READ_TIMEOUT_MS = 15000;
 
 function makeUf2Block(addr, data, blockIdx, totalBlocks) {
   const buf = new ArrayBuffer(UF2_BLOCK_SIZE);
@@ -359,71 +363,6 @@ function binaryToUf2(data, baseAddr) {
   for (let i = 0; i < total; i++) {
     const chunk = padded.slice(i * UF2_DATA_SIZE, (i + 1) * UF2_DATA_SIZE);
     out.set(makeUf2Block(baseAddr + i * UF2_DATA_SIZE, chunk, i, total), i * UF2_BLOCK_SIZE);
-  }
-  return out;
-}
-
-function withTimeout(promise, timeoutMs, label) {
-  let timeoutId = null;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timeoutId) clearTimeout(timeoutId);
-  });
-}
-
-async function flashReadWithFallback(pico, addr, size, label) {
-  try {
-    const data = await withTimeout(
-      pico.flashRead(addr, size),
-      FLASH_READ_TIMEOUT_MS,
-      label
-    );
-    return new Uint8Array(data);
-  } catch (primaryErr) {
-    const msg = (primaryErr && primaryErr.message) ? primaryErr.message : String(primaryErr);
-    const looksLikeReadHang = msg.includes('timed out') || msg.includes('Error from device');
-    if (!looksLikeReadHang) throw primaryErr;
-
-    // Fallback path: use a direct connection read and explicitly enter XIP.
-    // Some stacks/devices do not like READ after an unconditional EXIT_XIP.
-    const wasConnected = pico.isConnected();
-    try {
-      await pico.connect();
-      const conn = pico.getConnection();
-      await conn.resetInterface();
-      try { await conn.enterXip(); } catch (_) { /* best effort */ }
-      const data = await withTimeout(
-        conn.flashRead(addr, size),
-        FLASH_READ_TIMEOUT_MS,
-        `${label} (direct)`
-      );
-      return new Uint8Array(data);
-    } finally {
-      if (!wasConnected) {
-        try { await pico.disconnect(); } catch (_) { /* ignore close errors */ }
-      }
-    }
-  }
-}
-
-async function flashReadChunked(pico, addr, size, label = 'Flash read', onProgress = null) {
-  const out = new Uint8Array(size);
-  // Small reads are more reliable across browser/USB stacks than single large transfers.
-  const CHUNK = 0x1000;
-  for (let off = 0; off < size; off += CHUNK) {
-    const read = Math.min(CHUNK, size - off);
-    const chunk = await flashReadWithFallback(
-      pico,
-      addr + off,
-      read,
-      `${label} @+0x${off.toString(16)}`
-    );
-    out.set(chunk, off);
-    if (onProgress) onProgress(off + read, size);
   }
   return out;
 }
@@ -589,7 +528,7 @@ function updateBankStateBanner() {
   }
 
   if (bankDirty) {
-    stateEl.textContent = '● Unsaved changes — use ⚡ Flash to Device or ⬇ Download UF2 to apply them.';
+    stateEl.textContent = '● Unsaved changes — click ⬇ Download UF2, then drag it onto the device (in flash mode) to apply them.';
     stateEl.style.color = 'var(--accent)';
   } else if (loadedForSlot !== selectedSlot) {
     stateEl.textContent = 'This bank slot has not been pulled from the device yet — showing a blank/unrelated template. Use ⬆ Pull Sample Data from Device first if you want to see what’s actually there before editing.';
@@ -769,10 +708,19 @@ window.auditionSlotBrowser = auditionSlotBrowser;
 
 function auditionSlotDevice(i) {
   const slot = slots[i];
+  const bankSlot = bankSlots[i];
   if (!slot || slot.note < 0) { setStatus('This slot has no MIDI note to trigger.', true); return; }
   if (!midiOutput) { setStatus('Connect via Web MIDI to audition on the device.', true); return; }
   try {
-    midiOutput.playNote(slot.note, { channels: slot.channel > 0 ? slot.channel : 10, rawAttack: 100, duration: 200 });
+    console.log(`Auditioning slot ${i + 1} on device: note ${slot.note}, channel ${slot.channel}, velocity ${bankSlot.volume}`);
+    midiOutput.playNote(
+      slot.note, 
+      { 
+        channels: slot.channel > 0 ? slot.channel : 10, 
+        rawAttack: bankSlot.volume, 
+        duration: 200
+      }
+    );
   } catch(e) {
     setStatus('Audition failed: ' + e.message, true);
   }
@@ -863,10 +811,8 @@ window.updateSlotOptions = updateSlotOptions;
 updateSlotOptions();
 
 // ============================================================================
-// Picoboot flash operations
+// Bank binary build + UF2 download
 // ============================================================================
-import { Picoboot } from './lib/picoflash/index.js';
-
 async function getReadyBinary() {
   if (slots.length === 0) { setStatus('Connect via Web MIDI first so slot notes are known.', true); return null; }
   setStatus('Building bank binary…');
@@ -882,48 +828,6 @@ async function getReadyBinary() {
   }
 }
 
-async function flashToDevice() {
-  const binary = await getReadyBinary();
-  if (!binary) return;
-  const flashMB = parseInt(document.getElementById('flash-size').value);
-  const slot    = parseInt(document.getElementById('bank-slot').value);
-  const addr    = bankXipAddr(slot, flashMB);
-
-  // Reboot to BOOTSEL mode first — via MIDI if connected, otherwise instruct manually.
-  if (midiOutput) {
-    setStatus('Sending reboot-to-flash command via MIDI…');
-    sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
-    setStatus('Waiting for device to enter flash mode (2.5 s)…');
-    await new Promise(r => setTimeout(r, 2500));
-  } else {
-    setStatus('MIDI not connected — put device in flash mode first: hold BOOTSEL then press RESET (or use the Reboot to Flash Mode button here).');
-    await new Promise(r => setTimeout(r, 2000)); // give user time to read
-  }
-
-  setStatus('Select the Compulidian / RP2040 device in the popup…');
-  let pico;
-  try { pico = await Picoboot.requestDevice(); }
-  catch(e) { setStatus('Device not found: ' + e.message, true); return; }
-
-  showProgress(0);
-  try {
-    await pico.flashEraseAndWrite(addr, binary, (pct) => showProgress(pct));
-    await pico.reboot(200);
-    bankDirty = false;
-    loadedForSlot = slot;
-    bankValidity[slot] = true;
-    updateBankSlotOptionLabels();
-    updateBankActionAvailability();
-    updateBankStateBanner();
-    setStatus(`✓ Bank ${slot} flashed successfully (${(binary.length/1024).toFixed(1)} KB). Device rebooting…`, false, true);
-  } catch(e) {
-    setStatus('Flash failed: ' + e.message, true);
-  } finally {
-    hideProgress();
-  }
-}
-window.flashToDevice = flashToDevice;
-
 async function downloadUF2() {
   const binary = await getReadyBinary();
   if (!binary) return;
@@ -931,8 +835,12 @@ async function downloadUF2() {
   const slot    = parseInt(document.getElementById('bank-slot').value);
   const addr    = bankXipAddr(slot, flashMB);
 
+  let bank_name = document.getElementById('bank-name').value || 'My Kit';
+  // sanitize bank name for filename: only allow a-z, 0-9, dash, underscore, and dot; replace others with dash
+  bank_name = bank_name.toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+
   const uf2 = binaryToUf2(binary, addr);
-  const name = `compulidian-bank${slot}.uf2`;
+  const name = `compulidian-bank${slot}_${bank_name}.uf2`;
   const blob = new Blob([uf2], { type: 'application/octet-stream' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -942,123 +850,41 @@ async function downloadUF2() {
 }
 window.downloadUF2 = downloadUF2;
 
-async function readFromDevice(forceFlashMode = false) {
-  const flashMB = parseInt(document.getElementById('flash-size').value);
-  const slot    = parseInt(document.getElementById('bank-slot').value);
-  const addr    = bankXipAddr(slot, flashMB);
-  const bankSize = flashMB <= 2 ? FLASH_BANK_SIZE_2MB : FLASH_BANK_SIZE_16MB;
+async function readFromDevice(confirmFirst = true) {
+  const slot = parseInt(document.getElementById('bank-slot').value);
 
-  // Default path: runtime read over MIDI SysEx (no reboot to flash mode).
-  if (!forceFlashMode) {
-    if (!midiOutput) {
-      setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI (top of page) first.', true);
-      return;
-    }
-    try {
-      await readBankViaMidiRuntime(slot);
-      setStatus(`✓ Read bank ${slot} via MIDI runtime`, false, true);
-      return;
-    } catch (e) {
-      const msg = (e && e.message) || String(e);
-      if (msg.includes('NACK 4')) {
-        bankValidity[slot] = false;
-        updateBankSlotOptionLabels();
-        updateBankActionAvailability();
-        setStatus(`Bank ${slot} appears to be empty on the device — nothing to pull.`, true);
-      } else {
-        setStatus(`Runtime MIDI read failed: ${msg}`, true);
-      }
-      return;
-    }
-  }
-
-  if (bankSize <= 0) {
-    setStatus('This flash size has no user bank area to read from.', true);
+  if (confirmFirst && !confirm(`Overwrite changes in browser with data from device bank ${slot}?`)) {
     return;
   }
 
-  // Reading sample bank bytes requires picoboot/BOOTSEL mode, but this button
-  // should not force a reboot out of normal operation.
-  setStatus('Select the Compulidian / RP2040 device in flash mode (BOOTSEL) to read bank data…');
-  let pico;
-  try { pico = await Picoboot.requestDevice(); }
-  catch(e) {
-    setStatus('Device not found in flash mode. Use Reboot to Flash Mode first, then try Read from Device again.', true);
+  if (!midiOutput) {
+    setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI (top of page) first.', true);
     return;
   }
-
   try {
-    // Read header first to find out total PCM size
-    setStatus(`Reading bank header from slot ${slot}…`);
-    const rawHdr = await flashReadChunked(pico, addr, BANK_HEADER_SIZE, 'Header read');
-    const dv     = new DataView(rawHdr.buffer);
-    if (dv.getUint32(0, true) !== BANK_MAGIC) {
+    await readBankViaMidiRuntime(slot);
+    setStatus(`✓ Read bank ${slot} via MIDI runtime`, false, true);
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    if (msg.includes('NACK 4')) {
       bankValidity[slot] = false;
       updateBankSlotOptionLabels();
       updateBankActionAvailability();
-      setStatus(`Slot ${slot} is empty (magic 0x${dv.getUint32(0,true).toString(16)}).`); return;
+      setStatus(`Bank ${slot} appears to be empty on the device — nothing to pull.`, true);
+    } else {
+      setStatus(`Runtime MIDI read failed: ${msg}`, true);
     }
-    const numSamples = dv.getUint32(8, true);
-    if (numSamples > MAX_SAMPLES) {
-      setStatus(`Header looks invalid: sample count ${numSamples} exceeds max ${MAX_SAMPLES}.`, true);
-      return;
-    }
-    // Calculate total PCM bytes from the last entry
-    let pcmBytes = 0;
-    for (let i = 0; i < numSamples && i < MAX_SAMPLES; i++) {
-      const eo  = 48 + i * BANK_ENTRY_SIZE;
-      const off = dv.getUint32(eo, true);
-      const n   = dv.getUint32(eo + 4, true);
-      pcmBytes  = Math.max(pcmBytes, off + n * 2);
-    }
-    if (pcmBytes > bankSize - BANK_HEADER_SIZE) {
-      setStatus(`Header looks invalid: PCM size ${(pcmBytes / 1024).toFixed(0)} KB exceeds bank capacity.`, true);
-      return;
-    }
-    showProgress(0);
-
-    // Read PCM data in chunks (picoboot reads up to ~64 KB at a time reliably)
-    setStatus(`Reading ${numSamples} samples (${(pcmBytes/1024).toFixed(0)} KB PCM)…`);
-    const pcmRaw = await flashReadChunked(
-      pico,
-      addr + BANK_HEADER_SIZE,
-      pcmBytes,
-      'PCM read',
-      (done, total) => showProgress(done / total)
-    );
-    showProgress(1);
-    hideProgress();
-
-    // Assemble header + PCM and reuse the UF2-bank parser
-    const full = new Uint8Array(BANK_HEADER_SIZE + pcmBytes);
-    full.set(rawHdr, 0); full.set(pcmRaw, BANK_HEADER_SIZE);
-    await parseBankBinary(full, addr);
-  } catch(e) {
-    hideProgress();
-    // Helpful diagnostic: if reading flash base works, the selected bank layout
-    // is likely wrong for this hardware/firmware combination.
-    if ((e && e.message || '').includes('Header read')) {
-      try {
-        await flashReadChunked(pico, XIP_BASE, 256, 'Probe read');
-        setStatus('Read failed at bank address. Device responds, so selected flash size/slot likely does not match hardware layout.', true);
-        return;
-      } catch (_) {
-        // fall through to generic error
-      }
-    }
-    setStatus('Read failed: ' + e.message, true);
   }
 }
 window.readFromDevice = readFromDevice;
-window.readFromDeviceFlash = () => readFromDevice(true);
 
 async function rebootToBootloader() {
   // Try via SysEx first (device stays running), fall back to manual instruction.
   if (midiOutput) {
     sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
-    setStatus('Reboot command sent. Wait ~2s then connect via picoboot.');
+    setStatus('Reboot command sent. Device will appear as a USB drive (RPI-RP2) — drag the downloaded .uf2 file onto it to flash.');
   } else {
-    setStatus('Not connected via MIDI. Hold BOOTSEL and press RESET on the Pico, then use Flash to Device.');
+    setStatus('Not connected via MIDI. Hold BOOTSEL and press RESET on the Pico, then drag the downloaded .uf2 file onto the RPI-RP2 drive that appears.');
   }
 }
 window.rebootToBootloader = rebootToBootloader;
@@ -1441,7 +1267,7 @@ function bindMidiInputListener(input) {
   });
 
   input.addListener('noteon', e => {
-    midiDebug('rx noteon', { note: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
+    midiDebug('rx noteon', { note: e.midiNote, name: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
     // find the button that matches this note number, if any, and add a temporary border to indicate it is playing
     const btn = document.querySelector(`.audition-button[data-note="${e.note.number}"]`);
     if (btn) {
@@ -1451,7 +1277,7 @@ function bindMidiInputListener(input) {
   });
 
   input.addListener('noteoff', e => {
-    midiDebug('rx noteoff', { note: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
+    midiDebug('rx noteoff', { note: e.midiNote, name: e.note.name, octave: e.note.octave, velocity: e.velocity, channel: e.channel });
     // find the button that matches this note number, if any, and remove the temporary border
     const btn = document.querySelector(`.audition-button[data-note="${e.note.number}"]`);
     if (btn) {

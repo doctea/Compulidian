@@ -39,7 +39,7 @@ public:
 
     volatile bool interpolate_enabled = DEFAULT_INTERPOLATION_ENABLED; // default to interpolation enabled
     volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to processing in interrupt on second core
-    volatile bool enable_volume = false; // default to volume disabled
+    volatile bool enable_volume = true; // default to volume enabled
 
     volatile int global_pitch = 2048; // default to normal pitch
 
@@ -77,8 +77,12 @@ public:
                         } else {
                             newsample = sample_data[tracksample]->get_sample(index); // get the first sample to interpolate
                         }
-                        if (enable_volume) 
-                            newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
+                        if (enable_volume) {
+                            // newsample*=voice[track].level; // changed to MIDI velocity levels 0-127
+                            newsample *= sample[tracksample].play_volume; // scale by the sample's volume (0-1000)
+                            // newsample/=127; // scale down to 0-1000 for legacy reasons
+                            // newsample*=sample_data[tracksample]->get_volume(); // scale by the sample's volume (0-1000)
+                        }
                         samplesum+=newsample;
                         voice[track].sampleindex+=global_pitch; // add step increment
                     }
@@ -87,7 +91,7 @@ public:
                 }
           
                 if (enable_volume)
-                    samplesum=samplesum>>7;  // adjust for volume multiply above
+                    samplesum=samplesum>>10;  // adjust for volume multiply above
                 else
                     samplesum=samplesum>>3;  // adjust for volume multiply above
                 //samplesum=>>=6;  // scale down to 12 bit range

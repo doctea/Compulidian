@@ -28,6 +28,10 @@
   #include "sequencer/shuffle.h"
 #endif
 
+#ifdef ENABLE_ACCENTS
+  #include "accent/StepAccentSource.h"
+#endif
+
 #include "serial_debug.h"
 #include "audio/bank_manager.h"
 
@@ -145,13 +149,9 @@ void setup() {
 
   #ifdef ENABLE_SHUFFLE
     // set up shuffle pattern
-    int8_t shuffle_75[] = {0, 12, 0, 12, 0, 12, 0, 12};
-    shuffle_pattern_wrapper[0]->set_steps(shuffle_75, sizeof(shuffle_75));
-    //int8_t shuffle_straight[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    //shuffle_pattern_wrapper[0]->set_steps(shuffle_straight, sizeof(shuffle_straight));
-    //shuffle_pattern_wrapper[0]->set_amount(0.5);
-    //shuffle_pattern_wrapper[0]->set_active(true);
+    int8_t shuffle_75[] = {0, 12, 0, 12, 0, 12, 0, 12}; //, 12, 0, 12, 0, 12, 0, 12};
     uClock.setOnStep(shuffled_step_callback);
+    shuffle_pattern_wrapper[0]->set_steps(shuffle_75, sizeof(shuffle_75));
   #endif
 
   if (Serial) { Serial.println(F("done setup_uclock()")); }
@@ -196,12 +196,11 @@ void setup() {
     // ^^ don't do this here, as it will overwrite the connections made in setup_parameter_inputs()
   #endif
 
-  #ifdef USE_UCLOCK
-    //if (Serial) Serial.println("Starting uClock...");
-    clock_start();
-    //if (Serial) Serial.println("Started uClock!");
+  #ifdef ENABLE_ACCENTS
+    global_accent_source = new StepAccentSource(16);
+    const uint8_t strong_steps[] = {0, 4, 8, 12};
+    ((StepAccentSource*)global_accent_source)->set_pattern(strong_steps, 4);
   #endif
-  started = true;
 
   // set up repeating timers to process tasks
   #ifdef ENABLE_PARAMETERS
@@ -210,10 +209,17 @@ void setup() {
   #ifdef USE_TINYUSB
     add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
   #endif
-        
+
   #ifdef ENABLE_CLOCK_INPUT_CV
     set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
   #endif
+
+  #ifdef USE_UCLOCK
+    //if (Serial) Serial.println("Starting uClock...");
+    clock_start();
+    //if (Serial) Serial.println("Started uClock!");
+  #endif
+  started = true;
 
   if (Serial) { Serial.println(F("setup() done - starting!")); }
   if (Serial) {
@@ -295,7 +301,7 @@ void __not_in_flash_func(loop)() {
     process_pending_sysex_responses();
   #endif
 
-  if (handle_config_mode()) return;
+  // if (handle_config_mode()) return;
 
   // todo: will need this if/when we convert the WorkshopOutputWrapper to use the ring buffer that Microlidian now uses
   //output_wrapper->drain();
