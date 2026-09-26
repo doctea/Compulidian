@@ -6,3 +6,5 @@
 *.patch
 include/__version.h
 */venv/
+*__pycache__*
+*.pyc
