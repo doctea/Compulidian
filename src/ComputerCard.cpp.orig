@@ -1,41 +1,9 @@
 #include "ComputerCard.h"
 
 #ifdef ENABLE_CLOCK_INPUT_CV
+	extern volatile bool cv_clock_ticked;
+	extern volatile bool cv_clock_reset;
 	#include "clock.h"
-
-	struct CvClockEvent {
-		uint32_t observed_at_us;
-		bool reset;
-	};
-
-	static constexpr uint8_t CV_CLOCK_EVENT_QUEUE_SIZE = 8;
-	static CvClockEvent cv_clock_events[CV_CLOCK_EVENT_QUEUE_SIZE];
-	static volatile uint8_t cv_clock_event_head = 0;
-	static volatile uint8_t cv_clock_event_tail = 0;
-	volatile uint32_t cv_clock_event_overflow = 0;
-
-	static void enqueue_cv_clock_event(bool reset) {
-		uint8_t next_head = (cv_clock_event_head + 1) % CV_CLOCK_EVENT_QUEUE_SIZE;
-		if (next_head == cv_clock_event_tail) {
-			cv_clock_event_overflow++;
-			clock_report_external_event_overflow();
-			return;
-		}
-
-		cv_clock_events[cv_clock_event_head] = {micros(), reset};
-		cv_clock_event_head = next_head;
-	}
-
-	bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us) {
-		if (cv_clock_event_tail == cv_clock_event_head)
-			return false;
-
-		CvClockEvent event = cv_clock_events[cv_clock_event_tail];
-		cv_clock_event_tail = (cv_clock_event_tail + 1) % CV_CLOCK_EVENT_QUEUE_SIZE;
-		reset = event.reset;
-		observed_at_us = event.observed_at_us;
-		return true;
-	}
 #endif
 
 ComputerCard *ComputerCard::thisptr;
@@ -218,10 +186,20 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 
 	#ifdef ENABLE_CLOCK_INPUT_CV
 		if (last_pulse[0] != pulse[0] && pulse[0]) {
-			enqueue_cv_clock_event(true);
+			// Serial.println("Pulse 1 rising edge");
+			cv_clock_ticked = true;
+			if (clock_mode!=CLOCK_EXTERNAL_CV) {
+				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
+				change_clock_mode(CLOCK_EXTERNAL_CV);
+			}
 		}
 		if (last_pulse[1] != pulse[1] && pulse[1]) {
-			enqueue_cv_clock_event(false);
+			// Serial.println("Pulse 2 rising edge");
+			cv_clock_reset = true;
+			if (clock_mode!=CLOCK_EXTERNAL_CV) {
+				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
+				change_clock_mode(CLOCK_EXTERNAL_CV);
+			}
 		}
 	#endif
 

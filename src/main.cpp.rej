@@ -1,0 +1,28 @@
+--- src/main.cpp
++++ src/main.cpp
+@@ -105,13 +105,7 @@ void global_on_restart() {
+ #endif
+ 
+ #ifdef ENABLE_CLOCK_INPUT_CV
+-  extern volatile bool cv_clock_ticked;
+-  extern volatile bool cv_clock_reset;
+-  bool check_cv_clock_ticked() {
+-    bool was_ticked = cv_clock_ticked;
+-    cv_clock_ticked = false;
+-    return was_ticked;
+-  }
++  bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us);
+ #endif
+ 
+ void setup_usb();
+@@ -225,10 +219,6 @@ void setup() {
+     add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
+   #endif
+ 
+-  #ifdef ENABLE_CLOCK_INPUT_CV
+-    set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
+-  #endif
+-
+   #ifdef USE_UCLOCK
+     //if (Serial) Serial.println("Starting uClock...");
+     clock_start();
