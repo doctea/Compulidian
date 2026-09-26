@@ -5,8 +5,14 @@
 #include "settings.h"
 #include "audio/flash_layout.h"
 #include "audio/bank_manager.h"
+#include "audio/bank_config.h"
+#include "audio/sample_store.h"
 #include "workshop_output.h"
 #include "outputs/output_processor.h"
+
+#ifdef ENABLE_LITTLEFS
+#include <LittleFS.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // SysEx protocol v2 (matches tools/web/compulidian_manager.html)
@@ -22,12 +28,22 @@
 #define SYSEX_TYPE_GET_BANK_INFO_REQ 0x12
 #define SYSEX_TYPE_GET_BANK_CHUNK_REQ 0x13
 #define SYSEX_TYPE_GET_SLOTS_REQ  0x14
+#define SYSEX_TYPE_SET_BANK_CHUNK_REQ 0x15
+#define SYSEX_TYPE_GET_SAMPLES_INFO_REQ  0x16
+#define SYSEX_TYPE_GET_SAMPLES_CHUNK_REQ 0x17
+#define SYSEX_TYPE_GET_SAMPLE_META_INFO_REQ  0x18
+#define SYSEX_TYPE_GET_SAMPLE_META_CHUNK_REQ 0x19
+#define SYSEX_TYPE_SET_SAMPLE_META_CHUNK_REQ 0x1A
 #define SYSEX_TYPE_REBOOT_REQ     0x20
 
 #define SYSEX_TYPE_CONFIG_RESP    0x30
 #define SYSEX_TYPE_BANK_INFO_RESP 0x40
 #define SYSEX_TYPE_BANK_CHUNK_RESP 0x41
 #define SYSEX_TYPE_SLOTS_INFO_RESP 0x42
+#define SYSEX_TYPE_SAMPLES_INFO_RESP  0x43
+#define SYSEX_TYPE_SAMPLES_CHUNK_RESP 0x44
+#define SYSEX_TYPE_SAMPLE_META_INFO_RESP  0x45
+#define SYSEX_TYPE_SAMPLE_META_CHUNK_RESP 0x46
 #define SYSEX_TYPE_ACK            0x31
 #define SYSEX_TYPE_NACK           0x32
 
@@ -37,6 +53,7 @@
 #define SYSEX_NACK_UNKNOWN_TYPE           0x03
 #define SYSEX_NACK_INVALID_VALUE          0x04
 #define SYSEX_NACK_NOT_READY              0x05
+#define SYSEX_NACK_WRITE_FAILED           0x06
 
 #ifndef SYSEX_DEBUG
 #define SYSEX_DEBUG 0
@@ -65,16 +82,52 @@
 #define SYSEX_BANK_NAME   32   // bytes per bank name in the SysEx response
 // Raw chunk size must fit in 14 bits (encoded as two 7-bit bytes) - see send_bank_chunk_sysex().
 // Kept moderate (vs. e.g. 1024+) to bound stack usage of the payload buffers below.
+// This is the DOWNLOAD (device -> browser) direction only - send_sysex_frame()'s
+// large outgoing payloads bypass the MIDI library's RX assembly entirely (see
+// send_sysex_bytes_reliable_() above), so this can be much bigger than what
+// the device can *receive* (see SYSEX_BANK_WRITE_RAW_CHUNK_BYTES below).
 #define SYSEX_BANK_RAW_CHUNK_BYTES 512
 #define SYSEX_BANK_CHUNK_HEX_BYTES (SYSEX_BANK_RAW_CHUNK_BYTES * 2)
 #define SYSEX_BANK_CHUNK_HEADER_BYTES 6
 #define SYSEX_MAX_PAYLOAD (SYSEX_BANK_CHUNK_HEADER_BYTES + SYSEX_BANK_CHUNK_HEX_BYTES)
+
+// UPLOAD (browser -> device) direction: incoming SysEx is parsed by the
+// FortySevenEffects MIDI library using DefaultSettings::SysExMaxSize = 128
+// bytes TOTAL (including the F0/F7 delimiters) - see
+// ".pio/libdeps/*/MIDI Library/src/midi_Settings.h". A frame over that size
+// is silently truncated/dropped before handle_sysex() ever sees it, so the
+// raw chunk size for SET_BANK_CHUNK_REQ must keep
+// 8 (F0 + 6 header bytes + F7) + SYSEX_BANK_CHUNK_HEADER_BYTES + raw*2 <= 128.
+#define SYSEX_BANK_WRITE_RAW_CHUNK_BYTES 32
+// Total bytes buffered in RAM across all chunks of one incoming bank-config
+// upload before it's written to LittleFS - generously above the expected
+// config file size (~700 bytes for a full 32-slot bank) to allow headroom.
+#define SYSEX_BANK_WRITE_MAX_BYTES 2048
+
+// SampleStore listing (device -> browser, so - like GET_BANK_CHUNK - not
+// subject to the 128-byte incoming SysEx cap; chunk size is just kept
+// moderate to bound stack usage).
+#define SYSEX_SAMPLES_CHUNK_HEADER_BYTES 5
+#define SYSEX_SAMPLES_ENTRIES_PER_CHUNK 8
+#define SYSEX_SAMPLES_CHUNK_RAW_BYTES (SYSEX_SAMPLES_ENTRIES_PER_CHUNK * SAMPLESTORE_ENTRY_SIZE)
 
 // Slot-info response: one byte per note/channel, one length byte + label per
 // slot. Labels are truncated - they're only for display, not identity.
 #define SYSEX_SLOT_LABEL_MAX      23
 #define SYSEX_MAX_SLOTS_REPORTED  32
 #define SYSEX_SLOTS_MAX_PAYLOAD   (1 + SYSEX_MAX_SLOTS_REPORTED * (3 + SYSEX_SLOT_LABEL_MAX))
+
+// Sample metadata file (Phase F.4): opaque byte streaming, same pattern as
+// the bank-config chunk pair but for one fixed file (no slot byte needed).
+// Download direction (device -> browser) bypasses the incoming-SysEx size
+// cap (see send_bank_chunk_sysex()'s comment) so its chunk can be large;
+// upload direction (browser -> device) must obey the ~128-byte incoming
+// SysEx frame limit, same reasoning as SYSEX_BANK_WRITE_RAW_CHUNK_BYTES.
+#define SYSEX_META_CHUNK_HEADER_BYTES      5
+#define SYSEX_META_RAW_CHUNK_BYTES         512
+#define SYSEX_META_CHUNK_HEX_BYTES         (SYSEX_META_RAW_CHUNK_BYTES * 2)
+#define SYSEX_META_WRITE_RAW_CHUNK_BYTES   32
+#define SYSEX_META_WRITE_MAX_BYTES         8192
 
 static Settings current_settings;
 
@@ -87,6 +140,10 @@ enum PendingSysexAction : uint8_t {
     PENDING_SEND_BANK_INFO = 5,
     PENDING_SEND_BANK_CHUNK = 6,
     PENDING_SEND_SLOTS_INFO = 7,
+    PENDING_SEND_SAMPLES_INFO = 8,
+    PENDING_SEND_SAMPLES_CHUNK = 9,
+    PENDING_SEND_SAMPLE_META_INFO = 10,
+    PENDING_SEND_SAMPLE_META_CHUNK = 11,
 };
 
 struct PendingSysexItem {
@@ -105,6 +162,28 @@ static void send_config_sysex(uint8_t req_id = 0);
 static void send_bank_info_sysex(uint8_t req_id, uint8_t slot);
 static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_idx);
 static void send_slots_info_sysex(uint8_t req_id);
+static void send_samples_info_sysex(uint8_t req_id);
+static void send_samples_chunk_sysex(uint8_t req_id, uint16_t chunk_idx);
+static void send_sample_meta_info_sysex(uint8_t req_id);
+static void send_sample_meta_chunk_sysex(uint8_t req_id, uint16_t chunk_idx);
+static void handle_set_bank_chunk_(uint8_t req_id, uint8_t slot, uint16_t chunk_idx,
+                                    const uint8_t *hex, uint16_t raw_len, bool is_last);
+static void handle_set_sample_meta_chunk_(uint8_t req_id, uint16_t chunk_idx,
+                                           const uint8_t *hex, uint16_t raw_len, bool is_last);
+
+// State for an in-progress SET_BANK_CHUNK_REQ upload (one at a time; a
+// chunk_idx of 0 (re)starts it, discarding anything not yet finalised).
+// See handle_set_bank_chunk_().
+static uint8_t  bank_write_buf_[SYSEX_BANK_WRITE_MAX_BYTES];
+static uint32_t bank_write_len_ = 0;
+static uint8_t  bank_write_slot_ = 0;
+static bool     bank_write_active_ = false;
+
+// State for an in-progress SET_SAMPLE_META_CHUNK_REQ upload - same pattern
+// as bank_write_*_ above but for the single sample-metadata file (no slot).
+static uint8_t  meta_write_buf_[SYSEX_META_WRITE_MAX_BYTES];
+static uint32_t meta_write_len_ = 0;
+static bool     meta_write_active_ = false;
 
 static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 0, uint8_t arg2 = 0, uint8_t arg3 = 0) {
     noInterrupts();
@@ -243,6 +322,22 @@ static void process_pending_sysex_responses() {
             case PENDING_SEND_SLOTS_INFO:
                 send_slots_info_sysex(item.req_id);
                 break;
+            case PENDING_SEND_SAMPLES_INFO:
+                send_samples_info_sysex(item.req_id);
+                break;
+            case PENDING_SEND_SAMPLES_CHUNK: {
+                const uint16_t idx = (uint16_t)item.arg | ((uint16_t)item.arg2 << 7);
+                send_samples_chunk_sysex(item.req_id, idx);
+                break;
+            }
+            case PENDING_SEND_SAMPLE_META_INFO:
+                send_sample_meta_info_sysex(item.req_id);
+                break;
+            case PENDING_SEND_SAMPLE_META_CHUNK: {
+                const uint16_t idx = (uint16_t)item.arg | ((uint16_t)item.arg2 << 7);
+                send_sample_meta_chunk_sysex(item.req_id, idx);
+                break;
+            }
             default:
                 break;
         }
@@ -250,17 +345,26 @@ static void process_pending_sysex_responses() {
     }
 }
 
-static uint32_t compute_bank_pcm_bytes_(const BankHeader *hdr) {
-    if (!hdr) return 0;
-    uint32_t n = hdr->num_samples;
-    if (n > MAX_SAMPLES_PER_BANK) n = MAX_SAMPLES_PER_BANK;
-    uint32_t pcm_bytes = 0;
-    for (uint32_t i = 0; i < n; ++i) {
-        const BankEntryHeader &e = hdr->entries[i];
-        uint32_t end = e.offset + e.num_samples * 2u;
-        if (end > pcm_bytes) pcm_bytes = end;
-    }
-    return pcm_bytes;
+// Size in bytes of a bank's small saveloadlib config file at
+// /save/bank_N.txt (see audio/bank_config.h). Phase C retired the old
+// per-bank raw PCM blob format - samples are shared across banks in the
+// content-addressed SampleStore (audio/sample_store.h), so there is no
+// longer a single contiguous per-bank byte stream to report/download the
+// old way. The web tool's "download bank" chunk protocol below is repointed
+// at this (much smaller) config file instead.
+static uint32_t compute_bank_config_file_size_(uint8_t slot) {
+#ifdef ENABLE_LITTLEFS
+    char path[32];
+    snprintf(path, sizeof(path), BANK_CONFIG_SAVE_PATH_FMT, slot);
+    File f = LittleFS.open(path, "r");
+    if (!f) return 0;
+    uint32_t sz = (uint32_t)f.size();
+    f.close();
+    return sz;
+#else
+    (void)slot;
+    return 0;
+#endif
 }
 
 static inline uint8_t to_hex_nibble_(uint8_t v) {
@@ -283,21 +387,17 @@ static void send_bank_info_sysex(uint8_t req_id, uint8_t slot) {
         return;
     }
 
-    const BankHeader *hdr = bankManager.get_bank_header(slot);
-    if (!hdr) {
-        send_nack(req_id, SYSEX_NACK_NOT_READY);
-        return;
-    }
-
-    const uint32_t pcm_bytes = compute_bank_pcm_bytes_(hdr);
-    const uint32_t total_bytes = BANK_HEADER_SIZE + pcm_bytes;
+    const uint32_t config_bytes = compute_bank_config_file_size_(slot);
 
     uint8_t payload[12];
     memset(payload, 0, sizeof(payload));
     payload[0] = slot & 0x7F;
-    payload[1] = (uint8_t)hdr->num_samples & 0x7F;
-    put_u32_7bit_(payload + 2, pcm_bytes);
-    put_u32_7bit_(payload + 7, total_bytes);
+    payload[1] = (uint8_t)bankManager.get_bank_slot_count(slot) & 0x7F;
+    // "pcm_bytes" no longer applies per-bank (samples are shared across banks
+    // in the SampleStore) - reported as 0. "total_bytes" is now the size of
+    // the bank's small config file, which is what GET_BANK_CHUNK streams.
+    put_u32_7bit_(payload + 2, 0);
+    put_u32_7bit_(payload + 7, config_bytes);
 
     send_sysex_frame(SYSEX_TYPE_BANK_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, sizeof(payload));
 }
@@ -308,16 +408,19 @@ static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_i
         return;
     }
 
-    const BankHeader *hdr = bankManager.get_bank_header(slot);
-    if (!hdr) {
+#ifdef ENABLE_LITTLEFS
+    char path[32];
+    snprintf(path, sizeof(path), BANK_CONFIG_SAVE_PATH_FMT, slot);
+    File f = LittleFS.open(path, "r");
+    if (!f) {
         send_nack(req_id, SYSEX_NACK_NOT_READY);
         return;
     }
 
-    const uint32_t pcm_bytes = compute_bank_pcm_bytes_(hdr);
-    const uint32_t total_bytes = BANK_HEADER_SIZE + pcm_bytes;
+    const uint32_t total_bytes = (uint32_t)f.size();
     const uint32_t offset = (uint32_t)chunk_idx * SYSEX_BANK_RAW_CHUNK_BYTES;
     if (offset >= total_bytes) {
+        f.close();
         send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
         return;
     }
@@ -326,7 +429,14 @@ static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_i
     const uint16_t raw_len = (uint16_t)((remaining >= SYSEX_BANK_RAW_CHUNK_BYTES) ? SYSEX_BANK_RAW_CHUNK_BYTES : remaining);
     const bool is_last = (offset + raw_len) >= total_bytes;
 
-    const uint8_t *src = reinterpret_cast<const uint8_t*>(flash_bank_xip_addr(slot)) + offset;
+    uint8_t raw[SYSEX_BANK_RAW_CHUNK_BYTES];
+    f.seek(offset);
+    size_t got = f.read(raw, raw_len);
+    f.close();
+    if (got != raw_len) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
 
     uint8_t payload[SYSEX_BANK_CHUNK_HEADER_BYTES + SYSEX_BANK_CHUNK_HEX_BYTES];
     payload[0] = slot & 0x7F;
@@ -337,12 +447,234 @@ static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_i
     payload[5] = is_last ? 1 : 0;
 
     for (uint16_t i = 0; i < raw_len; ++i) {
-        const uint8_t b = src[i];
+        const uint8_t b = raw[i];
         payload[SYSEX_BANK_CHUNK_HEADER_BYTES + i * 2] = to_hex_nibble_(b >> 4);
         payload[SYSEX_BANK_CHUNK_HEADER_BYTES + i * 2 + 1] = to_hex_nibble_(b);
     }
 
     send_sysex_frame(SYSEX_TYPE_BANK_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_BANK_CHUNK_HEADER_BYTES + raw_len * 2));
+#else
+    (void)chunk_idx;
+    send_nack(req_id, SYSEX_NACK_NOT_READY);
+#endif
+}
+
+static inline bool from_hex_nibble_(uint8_t c, uint8_t *out) {
+    if (c >= '0' && c <= '9') { *out = (uint8_t)(c - '0'); return true; }
+    if (c >= 'A' && c <= 'F') { *out = (uint8_t)(c - 'A' + 10); return true; }
+    if (c >= 'a' && c <= 'f') { *out = (uint8_t)(c - 'a' + 10); return true; }
+    return false;
+}
+
+// Write counterpart to send_bank_chunk_sysex()/GET_BANK_CHUNK: the browser
+// tool pushes a bank config file to the device live (running, no reboot),
+// one small chunk at a time (see SYSEX_BANK_WRITE_RAW_CHUNK_BYTES for why
+// chunks are much smaller here than the download direction). Chunk payload
+// layout mirrors BANK_CHUNK_RESP: [slot, idx_lo, idx_hi, raw_len_lo,
+// raw_len_hi, is_last, hex_data...].
+static void handle_set_bank_chunk_(uint8_t req_id, uint8_t slot, uint16_t chunk_idx,
+                                    const uint8_t *hex, uint16_t raw_len, bool is_last) {
+    if (slot < 1 || slot > FLASH_MAX_BANKS) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    if (chunk_idx == 0) {
+        // (Re)start an upload for this slot - discard anything buffered
+        // for a previous, never-finalised upload.
+        bank_write_active_ = true;
+        bank_write_slot_ = slot;
+        bank_write_len_ = 0;
+    }
+
+    if (!bank_write_active_ || bank_write_slot_ != slot) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const uint32_t offset = (uint32_t)chunk_idx * SYSEX_BANK_WRITE_RAW_CHUNK_BYTES;
+    if (offset != bank_write_len_ || offset + raw_len > sizeof(bank_write_buf_)) {
+        // Chunks must arrive in order with no gaps, and the whole upload
+        // must fit within our fixed RAM buffer.
+        bank_write_active_ = false;
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+        return;
+    }
+
+    for (uint16_t i = 0; i < raw_len; ++i) {
+        uint8_t hi, lo;
+        if (!from_hex_nibble_(hex[i * 2], &hi) || !from_hex_nibble_(hex[i * 2 + 1], &lo)) {
+            bank_write_active_ = false;
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+            return;
+        }
+        bank_write_buf_[offset + i] = (uint8_t)((hi << 4) | lo);
+    }
+    bank_write_len_ = offset + raw_len;
+
+    if (!is_last) {
+        enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+        return;
+    }
+
+    bank_write_active_ = false;
+
+#ifdef ENABLE_LITTLEFS
+    char path[32];
+    snprintf(path, sizeof(path), BANK_CONFIG_SAVE_PATH_FMT, slot);
+    File f = LittleFS.open(path, "w");
+    if (!f) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_WRITE_FAILED);
+        return;
+    }
+    size_t written = f.write(bank_write_buf_, bank_write_len_);
+    f.close();
+    if (written != bank_write_len_) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_WRITE_FAILED);
+        return;
+    }
+
+    bankManager.refresh_bank(slot);
+#else
+    enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_NOT_READY);
+    return;
+#endif
+
+    enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+}
+
+// Sample metadata file (Phase F.4): opaque byte streaming for the single
+// fixed file at SAMPLE_META_SAVE_PATH. Firmware never parses this file's
+// contents - it's purely for the PC tool's type/tag UI. Mirrors
+// send_bank_chunk_sysex()/handle_set_bank_chunk_() but without a slot
+// parameter (there's only ever one metadata file).
+static void send_sample_meta_info_sysex(uint8_t req_id) {
+#ifdef ENABLE_LITTLEFS
+    uint32_t total_bytes = 0;
+    File f = LittleFS.open(SAMPLE_META_SAVE_PATH, "r");
+    if (f) {
+        total_bytes = (uint32_t)f.size();
+        f.close();
+    }
+    uint8_t payload[5];
+    put_u32_7bit_(payload, total_bytes);
+    send_sysex_frame(SYSEX_TYPE_SAMPLE_META_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, sizeof(payload));
+#else
+    send_nack(req_id, SYSEX_NACK_NOT_READY);
+#endif
+}
+
+static void send_sample_meta_chunk_sysex(uint8_t req_id, uint16_t chunk_idx) {
+#ifdef ENABLE_LITTLEFS
+    File f = LittleFS.open(SAMPLE_META_SAVE_PATH, "r");
+    if (!f) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+
+    const uint32_t total_bytes = (uint32_t)f.size();
+    const uint32_t offset = (uint32_t)chunk_idx * SYSEX_META_RAW_CHUNK_BYTES;
+    if (offset >= total_bytes && total_bytes != 0) {
+        f.close();
+        send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const uint32_t remaining = total_bytes - offset;
+    const uint16_t raw_len = (uint16_t)((remaining >= SYSEX_META_RAW_CHUNK_BYTES) ? SYSEX_META_RAW_CHUNK_BYTES : remaining);
+    const bool is_last = (offset + raw_len) >= total_bytes;
+
+    uint8_t raw[SYSEX_META_RAW_CHUNK_BYTES];
+    if (raw_len > 0) {
+        f.seek(offset);
+        size_t got = f.read(raw, raw_len);
+        f.close();
+        if (got != raw_len) {
+            send_nack(req_id, SYSEX_NACK_NOT_READY);
+            return;
+        }
+    } else {
+        f.close();
+    }
+
+    uint8_t payload[SYSEX_META_CHUNK_HEADER_BYTES + SYSEX_META_CHUNK_HEX_BYTES];
+    payload[0] = (uint8_t)(chunk_idx & 0x7F);
+    payload[1] = (uint8_t)((chunk_idx >> 7) & 0x7F);
+    payload[2] = (uint8_t)(raw_len & 0x7F);
+    payload[3] = (uint8_t)((raw_len >> 7) & 0x7F);
+    payload[4] = is_last ? 1 : 0;
+
+    for (uint16_t i = 0; i < raw_len; ++i) {
+        const uint8_t b = raw[i];
+        payload[SYSEX_META_CHUNK_HEADER_BYTES + i * 2] = to_hex_nibble_(b >> 4);
+        payload[SYSEX_META_CHUNK_HEADER_BYTES + i * 2 + 1] = to_hex_nibble_(b);
+    }
+
+    send_sysex_frame(SYSEX_TYPE_SAMPLE_META_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_META_CHUNK_HEADER_BYTES + raw_len * 2));
+#else
+    (void)chunk_idx;
+    send_nack(req_id, SYSEX_NACK_NOT_READY);
+#endif
+}
+
+// Write counterpart to send_sample_meta_chunk_sysex()/GET_SAMPLE_META_CHUNK:
+// chunk payload layout mirrors SAMPLE_META_CHUNK_RESP but without the slot
+// byte: [idx_lo, idx_hi, raw_len_lo, raw_len_hi, is_last, hex_data...].
+static void handle_set_sample_meta_chunk_(uint8_t req_id, uint16_t chunk_idx,
+                                           const uint8_t *hex, uint16_t raw_len, bool is_last) {
+    if (chunk_idx == 0) {
+        meta_write_active_ = true;
+        meta_write_len_ = 0;
+    }
+
+    if (!meta_write_active_) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const uint32_t offset = (uint32_t)chunk_idx * SYSEX_META_WRITE_RAW_CHUNK_BYTES;
+    if (offset != meta_write_len_ || offset + raw_len > sizeof(meta_write_buf_)) {
+        meta_write_active_ = false;
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+        return;
+    }
+
+    for (uint16_t i = 0; i < raw_len; ++i) {
+        uint8_t hi, lo;
+        if (!from_hex_nibble_(hex[i * 2], &hi) || !from_hex_nibble_(hex[i * 2 + 1], &lo)) {
+            meta_write_active_ = false;
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+            return;
+        }
+        meta_write_buf_[offset + i] = (uint8_t)((hi << 4) | lo);
+    }
+    meta_write_len_ = offset + raw_len;
+
+    if (!is_last) {
+        enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+        return;
+    }
+
+    meta_write_active_ = false;
+
+#ifdef ENABLE_LITTLEFS
+    File f = LittleFS.open(SAMPLE_META_SAVE_PATH, "w");
+    if (!f) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_WRITE_FAILED);
+        return;
+    }
+    size_t written = f.write(meta_write_buf_, meta_write_len_);
+    f.close();
+    if (written != meta_write_len_) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_WRITE_FAILED);
+        return;
+    }
+#else
+    enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_NOT_READY);
+    return;
+#endif
+
+    enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
 }
 
 // Reports the currently active MIDIOutputProcessor's slots generically (by
@@ -383,6 +715,55 @@ static void send_slots_info_sysex(uint8_t req_id) {
     send_sysex_frame(SYSEX_TYPE_SLOTS_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, pos);
 }
 
+// Lists the shared content-addressed SampleStore (see audio/sample_store.h)
+// so the web tool can offer a "assign an already-uploaded sample to this
+// voice" picker without the user having to know/enter raw content hashes.
+static void send_samples_info_sysex(uint8_t req_id) {
+    uint8_t payload[5];
+    put_u32_7bit_(payload, sampleStore.is_valid() ? sampleStore.num_entries() : 0);
+    send_sysex_frame(SYSEX_TYPE_SAMPLES_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, sizeof(payload));
+}
+
+static void send_samples_chunk_sysex(uint8_t req_id, uint16_t chunk_idx) {
+    if (!sampleStore.is_valid()) {
+        send_nack(req_id, SYSEX_NACK_NOT_READY);
+        return;
+    }
+
+    const uint32_t total_entries = sampleStore.num_entries();
+    const uint32_t start = (uint32_t)chunk_idx * SYSEX_SAMPLES_ENTRIES_PER_CHUNK;
+    if (start >= total_entries) {
+        send_nack(req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+
+    const uint32_t remaining = total_entries - start;
+    const uint32_t count = (remaining >= SYSEX_SAMPLES_ENTRIES_PER_CHUNK) ? SYSEX_SAMPLES_ENTRIES_PER_CHUNK : remaining;
+    const bool is_last = (start + count) >= total_entries;
+
+    uint8_t raw[SYSEX_SAMPLES_CHUNK_RAW_BYTES];
+    for (uint32_t i = 0; i < count; ++i) {
+        const SampleStoreEntryHeader *entry = sampleStore.entry_at(start + i);
+        memcpy(raw + i * SAMPLESTORE_ENTRY_SIZE, entry, SAMPLESTORE_ENTRY_SIZE);
+    }
+    const uint16_t raw_len = (uint16_t)(count * SAMPLESTORE_ENTRY_SIZE);
+
+    uint8_t payload[SYSEX_SAMPLES_CHUNK_HEADER_BYTES + SYSEX_SAMPLES_CHUNK_RAW_BYTES * 2];
+    payload[0] = (uint8_t)(chunk_idx & 0x7F);
+    payload[1] = (uint8_t)((chunk_idx >> 7) & 0x7F);
+    payload[2] = (uint8_t)(raw_len & 0x7F);
+    payload[3] = (uint8_t)((raw_len >> 7) & 0x7F);
+    payload[4] = is_last ? 1 : 0;
+
+    for (uint16_t i = 0; i < raw_len; ++i) {
+        const uint8_t b = raw[i];
+        payload[SYSEX_SAMPLES_CHUNK_HEADER_BYTES + i * 2] = to_hex_nibble_(b >> 4);
+        payload[SYSEX_SAMPLES_CHUNK_HEADER_BYTES + i * 2 + 1] = to_hex_nibble_(b);
+    }
+
+    send_sysex_frame(SYSEX_TYPE_SAMPLES_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_SAMPLES_CHUNK_HEADER_BYTES + raw_len * 2));
+}
+
 static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
     if (!payload || !payload_len) return false;
 
@@ -404,10 +785,10 @@ static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
     // Mask each byte to 7 bits — SysEx data bytes must be 0x00–0x7F.
     for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
         uint8_t *dst = payload + SYSEX_DATA_LEN + (slot - 1) * SYSEX_BANK_NAME;
-        const BankHeader *hdr = bankManager.get_bank_header(slot);
-        if (hdr) {
+        const char *name = bankManager.get_bank_name(slot);
+        if (name) {
             for (int i = 0; i < SYSEX_BANK_NAME - 1; i++) {
-                char c = hdr->bank_name[i];
+                char c = name[i];
                 if (c == '\0') break;
                 dst[i] = (uint8_t)c & 0x7F;
             }
@@ -493,6 +874,69 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         }
         enqueue_pending_sysex(PENDING_SEND_SLOTS_INFO, req_id);
 
+    } else if (type == SYSEX_TYPE_SET_BANK_CHUNK_REQ) {
+        if (payload_len < SYSEX_BANK_CHUNK_HEADER_BYTES) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint8_t slot = d[0] & 0x7F;
+        const uint16_t chunk_idx = (uint16_t)(d[1] & 0x7F) | ((uint16_t)(d[2] & 0x7F) << 7);
+        const uint16_t raw_len   = (uint16_t)(d[3] & 0x7F) | ((uint16_t)(d[4] & 0x7F) << 7);
+        const bool is_last = d[5] != 0;
+        const unsigned hex_len = payload_len - SYSEX_BANK_CHUNK_HEADER_BYTES;
+        if (raw_len > SYSEX_BANK_WRITE_RAW_CHUNK_BYTES || hex_len != (unsigned)raw_len * 2) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        handle_set_bank_chunk_(req_id, slot, chunk_idx, d + SYSEX_BANK_CHUNK_HEADER_BYTES, raw_len, is_last);
+
+    } else if (type == SYSEX_TYPE_GET_SAMPLES_INFO_REQ) {
+        if (payload_len != 0) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        enqueue_pending_sysex(PENDING_SEND_SAMPLES_INFO, req_id);
+
+    } else if (type == SYSEX_TYPE_GET_SAMPLES_CHUNK_REQ) {
+        if (payload_len != 2) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint8_t idx_lo = d[0] & 0x7F;
+        const uint8_t idx_hi = d[1] & 0x7F;
+        enqueue_pending_sysex(PENDING_SEND_SAMPLES_CHUNK, req_id, idx_lo, idx_hi);
+
+    } else if (type == SYSEX_TYPE_GET_SAMPLE_META_INFO_REQ) {
+        if (payload_len != 0) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        enqueue_pending_sysex(PENDING_SEND_SAMPLE_META_INFO, req_id);
+
+    } else if (type == SYSEX_TYPE_GET_SAMPLE_META_CHUNK_REQ) {
+        if (payload_len != 2) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint8_t idx_lo = d[0] & 0x7F;
+        const uint8_t idx_hi = d[1] & 0x7F;
+        enqueue_pending_sysex(PENDING_SEND_SAMPLE_META_CHUNK, req_id, idx_lo, idx_hi);
+
+    } else if (type == SYSEX_TYPE_SET_SAMPLE_META_CHUNK_REQ) {
+        if (payload_len < SYSEX_META_CHUNK_HEADER_BYTES) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        const uint16_t chunk_idx = (uint16_t)(d[0] & 0x7F) | ((uint16_t)(d[1] & 0x7F) << 7);
+        const uint16_t raw_len   = (uint16_t)(d[2] & 0x7F) | ((uint16_t)(d[3] & 0x7F) << 7);
+        const bool is_last = d[4] != 0;
+        const unsigned hex_len = payload_len - SYSEX_META_CHUNK_HEADER_BYTES;
+        if (raw_len > SYSEX_META_WRITE_RAW_CHUNK_BYTES || hex_len != (unsigned)raw_len * 2) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        handle_set_sample_meta_chunk_(req_id, chunk_idx, d + SYSEX_META_CHUNK_HEADER_BYTES, raw_len, is_last);
+
     } else if (type == SYSEX_TYPE_SET_CONFIG_REQ) {
         if (payload_len < SYSEX_DATA_LEN) {
             enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
@@ -502,6 +946,23 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         if (d[0] > FLASH_MAX_BANKS) {
             enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
             return;
+        }
+
+        // Attempt the bank switch BEFORE touching current_settings.active_bank
+        // (and before any flash write below) - only commit the new value once
+        // we know it actually took effect. Otherwise a failed switch (e.g. an
+        // empty/never-configured bank slot) would leave current_settings
+        // pointing at a bank that was never actually loaded, desyncing it
+        // from bankManager.active_bank() (the bank really playing). That
+        // desync then makes a *later* request to switch back to the
+        // previously-active bank look like a no-op (same value already
+        // "set"), silently skipping the switch_bank() call that should have
+        // restored playback.
+        if ((int)d[0] != bankManager.active_bank()) {
+            if (!bankManager.switch_bank(d[0])) {
+                enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+                return;
+            }
         }
 
         current_settings.active_bank = d[0];
@@ -526,12 +987,6 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         // the change survive a reboot.
         const bool persist = (payload_len < SYSEX_DATA_LEN + 1) || (d[SYSEX_DATA_LEN] != 0);
         if (persist) settings_save(&current_settings);
-        if ((int)current_settings.active_bank != bankManager.active_bank()) {
-            if (!bankManager.switch_bank(current_settings.active_bank)) {
-                enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
-                return;
-            }
-        }
 
         enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
         enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);

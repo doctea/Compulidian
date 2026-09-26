@@ -166,19 +166,17 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            if (this->debug) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
+            if (this->debug && Serial) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             if (sw->enable_volume) {
-                // @@TODO: figure out the correct velocity scaling to use here
-                // todo: why is velocity getting optimised out apparently?!
-                voice[voice_number].level = velocity; // * 10; //map(velocity, 0, 127, 0, 1000); // scale velocity to 0-1000 for legacy reasons
+                voice[voice_number].level = velocity;
             } else {
                 voice[voice_number].level = 127;
                 // voice[voice_number].level = sample[voice[voice_number].sample].play_volume / 2; // set the velocity for the sample
             }
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
         } else {
-            if (Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
+            if (this->debug && Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
             //Serial.flush();
         }
     }
@@ -188,7 +186,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
 
-        if (debug) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
+        if (this->debug && Serial) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
             sw->LedOff(output_number % sw->numLeds);
 

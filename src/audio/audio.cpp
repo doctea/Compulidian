@@ -2,6 +2,7 @@
 
 #include "audio/audio.h"
 #include "audio/bank_manager.h"
+#include "audio/sample_store.h"
 //#include "computer.h"
 
 BaseSampleData **sample_data = nullptr;
@@ -107,8 +108,13 @@ int NUM_VOICES = sizeof(voice)/sizeof(voice[0]); // number of voices in the syst
 #include "audio/samps.h"
 
 void setup_samples() {
-    // All bank detection, sample_data allocation, and compiled-in/flash bank
-    // loading is now handled by BankManager.  It reads Settings::active_bank
+    // Phase B: scan the content-addressed sample store index first (read-only)
+    // so BankManager can resolve bank config sample_id references against it
+    // - see audio/sample_store.h.
+    sampleStore.setup();
+
+    // All bank detection, sample_data allocation, and compiled-in/bank
+    // config loading is handled by BankManager. It reads Settings::active_bank
     // from flash and loads the appropriate bank automatically.
     bankManager.setup();
 }

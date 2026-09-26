@@ -124,10 +124,8 @@ void setup_parameter_inputs() {
     ); 
     //vpi_mome_switch->debug = true;
     
-    #ifdef ENABLE_SHUFFLE
-        VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
-        VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
-    #endif
+    VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
+    VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
 
     //parameter_manager->voltage_sources->get(0)->debug = true;
 
@@ -147,10 +145,8 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(vpi_knob_y);
     parameter_manager->addInput(vpi_hold_switch);
     parameter_manager->addInput(vpi_mome_switch);
-    #ifdef ENABLE_SHUFFLE
-        parameter_manager->addInput(vpi_audio_in_1);
-        parameter_manager->addInput(vpi_audio_in_2);
-    #endif
+    parameter_manager->addInput(vpi_audio_in_1);
+    parameter_manager->addInput(vpi_audio_in_2);
 
     /*VirtualParameterInput *virtpi1 = new VirtualParameterInput((char*)"LFO sync", "LFOs", LFO_LOCKED);
     VirtualParameterInput *virtpi2 = new VirtualParameterInput((char*)"LFO free", "LFOs", LFO_FREE);
@@ -167,11 +163,12 @@ void setup_parameter_inputs() {
 
     int parameter_index = 0;
     #ifdef ENABLE_SHUFFLE
-        //FloatParameter *shuffle_amount_parameter = sequencer->getParameters()->get(parameter_index);
-        FloatParameter *shuffle_amount_parameter = sequencer->getParameterByName("Shuffle amount 0");   // untested
+        FloatParameter *shuffle_amount_parameter = sequencer->getParameterByName("Shuffle amount 0");
         if (shuffle_amount_parameter==nullptr) {
             Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
         } else {
+            // shuffle_amount_parameter->updateValueFromNormal(0.2f);
+            // sequencer->set_shuffle_enabled(true);
             shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
             parameter_index++;
         }

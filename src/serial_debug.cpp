@@ -8,8 +8,15 @@
 #include "audio/bank_manager.h"
 #include "audio/flash_layout.h"
 #include "audio/bank_header.h"
+#include "audio/sample_store.h"
 #include "settings.h"
 #include "configurator.h"
+
+#ifdef ENABLE_LITTLEFS
+  #include "live_settings.h"
+#endif
+
+extern int debug_step_offset;
 
 #ifdef USE_TINYUSB
 
@@ -132,39 +139,15 @@
               FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
           Serial.printf("  slot 0: compiled-in  valid=%s  voices=%d\n",
               bankManager.is_bank_valid(0) ? "yes" : "no", NUM_VOICES);
+#ifdef ENABLE_LITTLEFS
           for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
-              uint32_t addr = flash_bank_xip_addr(slot);
-              const BankHeader *hdr = reinterpret_cast<const BankHeader *>(addr);
-              bool ok = bankManager.is_bank_valid(slot);
-              Serial.printf("  slot %d @ 0x%08X: %s  magic=0x%08X  n=%u  name='%.*s'\n",
-                  slot, addr,
-                  ok ? "VALID" : "empty",
-                  hdr->magic, hdr->num_samples, 31, hdr->bank_name);
-              if (ok) {
-                  for (uint32_t i = 0; i < hdr->num_samples && i < MAX_SAMPLES_PER_BANK; i++) {
-                      const BankEntryHeader &e = hdr->entries[i];
-                      float dur = e.sample_rate > 0 ? (float)e.num_samples / e.sample_rate : 0.f;
-                      const char *note_name = "";
-                      switch (e.midi_note) {
-                          case 35: note_name="AcBD"; break; case 36: note_name="BD";   break;
-                          case 37: note_name="Rim";  break; case 38: note_name="SD";   break;
-                          case 39: note_name="Clap"; break; case 40: note_name="ElSD"; break;
-                          case 42: note_name="CHH";  break; case 44: note_name="PHH";  break;
-                          case 46: note_name="OHH";  break; case 49: note_name="Crs";  break;
-                          case 51: note_name="Ride"; break; case 50: note_name="HiTm"; break;
-                          case 48: note_name="MdTm"; break; case 45: note_name="LoTm"; break;
-                          case 43: note_name="FlTm"; break; case 56: note_name="Cowb"; break;
-                          default: note_name="";     break;
-                      }
-                      Serial.printf("    [%2u] %-23s  note=%3u %-4s  vol=%3u  %5u Hz  %ub=%u (%.2fs)\n",
-                          i, e.name[0] ? e.name : "(unnamed)",
-                          e.midi_note, note_name,
-                          e.volume, e.sample_rate,
-                          e.bit_depth, e.num_samples, dur);
-                  }
-              }
+              bankManager.debug_print_bank_detail(slot);
           }
+#else
+          Serial.println("  (bank config files unavailable - ENABLE_LITTLEFS not defined in this build)");
+#endif
           Serial.printf("---\n");
+
         } else if (serial_input_buffer[0]=='B') {
           // switch to a different bank
           int desired_bank = atoi(&serial_input_buffer[2]);
@@ -176,6 +159,38 @@
         } else if (serial_input_buffer[0]=='X') {
           // send config to the host (for debugging)
           send_config_sysex();
+        } else if (serial_input_buffer[0]=='y') {
+          // dump the live saveloadlib settings tree - Phase A smoke test
+          #ifdef ENABLE_LITTLEFS
+            extern ISaveableSettingHost* SL_ROOT;
+            if (SL_ROOT) {
+                LinkedList<String> lines;
+                sl_save_to_linkedlist(SL_ROOT, lines, SL_SCOPE_ALL);
+                for (size_t i = 0; i < lines.size(); i++) Serial.println(lines.get(i));
+            } else {
+                Serial.println("SL_ROOT not registered yet");
+            }
+          #else
+            Serial.println("ENABLE_LITTLEFS not defined in this build");
+          #endif
+        } else if (serial_input_buffer[0]=='Y') {
+          // dump sample store status - Phase B smoke test
+          Serial.printf("SampleStore: valid=%s  entries=%u  region=0x%08X+0x%08X\n",
+              sampleStore.is_valid() ? "yes" : "no",
+              sampleStore.num_entries(),
+              FLASH_SAMPLESTORE_ADDR, FLASH_SAMPLESTORE_SIZE);
+          for (uint32_t i = 0; i < sampleStore.num_entries(); i++) {
+              const SampleStoreEntryHeader *e = sampleStore.entry_at(i);
+              if (!e) continue;
+              Serial.printf("  [%3u] hash=0x%08X  %5u Hz  %ub x %u  '%.*s'\n",
+                  i, e->content_hash, e->sample_rate, e->bit_depth, e->num_samples,
+                  24, e->name);
+          }
+        } else if (serial_input_buffer[0]=='Z') {
+          // set the debug_step_offset to a new value
+          int new_offset = atoi(&serial_input_buffer[2]);
+          debug_step_offset = new_offset;
+          Serial.printf("debug_step_offset set to %d (%d)\n", debug_step_offset, new_offset);
         } else if (serial_input_buffer[0]=='?') {
           Serial.println(
             "Commands: "
@@ -189,7 +204,9 @@
             "v=volume  "
             "V=version  "
             "I=input debug  "
-            "d/D=param debug"
+            "d/D=param debug  "
+            "y=dump live settings  "
+            "Y=dump sample store"
           );
         }
         serial_input_buffer_index = 0;

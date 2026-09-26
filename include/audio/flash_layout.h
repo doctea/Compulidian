@@ -45,19 +45,44 @@
 #define FLASH_BANKS_OFFSET  (FLASH_SETTINGS_OFFSET + FLASH_SETTINGS_RESERVED)  // 0x00200000
 #define FLASH_BANKS_ADDR    (XIP_BASE + FLASH_BANKS_OFFSET)
 
+// ---------------------------------------------------------------------------
+// LittleFS reservation (ENABLE_LITTLEFS builds only)
+// ---------------------------------------------------------------------------
+// The earlephilhower core carves the LittleFS partition (board_build.
+// filesystem_size) plus a fixed 4 KB EEPROM-emulation region from the TOP of
+// flash (sized from board_upload.maximum_size), so the bank region below
+// must stop well short of the top. Keep FLASH_LITTLEFS_RESERVED_SIZE in sync
+// with board_build.filesystem_size for env:rpipico_16mb; the extra headroom
+// below covers the core's 4 KB EEPROM region plus a safety margin.
+#define FLASH_LITTLEFS_RESERVED_SIZE 0x00200000u   // 2 MB headroom (1 MB filesystem + margin)
+
 // Per-bank size and maximum bank count depend on total flash size.
 #if FLASH_SIZE_MB <= 2
   // 2 MB board: the compiled-in 808 samples make the firmware ~1.73 MB,
-  // leaving no usable flash for user banks.  Banks are disabled; only the
-  // compiled-in bank 0 is available.
+  // leaving no usable flash for user banks. Banks (and LittleFS/live
+  // settings) are disabled; only the compiled-in bank 0 is available.
   #define FLASH_BANK_SIZE   0u
   #define FLASH_MAX_BANKS   0
 #else
-  // 16 MB board: 14 MB available from the 2 MB mark (16 - 2 = 14).
-  // 4 banks × 3.5 MB = 14 MB exactly.
-  #define FLASH_BANK_SIZE   0x00380000u   // 3.5 MB per bank
+  // 16 MB board: banks occupy 2 MB..14 MB (4 x 3 MB), leaving the top 2 MB
+  // free for the LittleFS partition + the core's EEPROM region + margin.
+  #define FLASH_BANK_SIZE   0x00300000u   // 3 MB per bank
   #define FLASH_MAX_BANKS   4
 #endif
+
+// ---------------------------------------------------------------------------
+// Sample store region (Phase B) — content-addressed, shared across banks.
+// ---------------------------------------------------------------------------
+// Reuses the same physical space as the legacy per-bank blob region above,
+// rather than a separate reservation, since Phase C retires the old
+// per-bank blob format in favour of this shared store + small per-bank
+// config files. Until Phase C rewires BankManager to use it, writing
+// sample-store data here means the legacy per-bank BankHeader magic checks
+// will simply stop finding valid banks (fails safe: falls back to the
+// compiled-in bank 0) - see include/audio/sample_store.h.
+#define FLASH_SAMPLESTORE_OFFSET  FLASH_BANKS_OFFSET
+#define FLASH_SAMPLESTORE_ADDR    (XIP_BASE + FLASH_SAMPLESTORE_OFFSET)
+#define FLASH_SAMPLESTORE_SIZE    ((uint32_t)FLASH_BANK_SIZE * (uint32_t)FLASH_MAX_BANKS)
 
 // ---------------------------------------------------------------------------
 // Helper functions

@@ -35,11 +35,17 @@
 #include "serial_debug.h"
 #include "audio/bank_manager.h"
 
+#ifdef ENABLE_LITTLEFS
+  #include <LittleFS.h>
+#endif
+
 #include <string.h>
 #include <SimplyAtomic.h>
 #include <RP2040.h>
 
 #include "configurator.h"
+
+int debug_step_offset = 0;
 
 WorkshopOutputWrapper output_wrapper(&sw);
 
@@ -93,7 +99,8 @@ void global_on_restart() {
 
 #ifdef ENABLE_SHUFFLE
   void shuffled_step_callback(uint32_t step) {
-    sequencer->on_step_shuffled(0, step);
+    if (Serial) Serial.printf("shuffled_step_callback() called with step=%lu, while ticks is %ld (step=%ld)\n", step, ticks, ticks, ticks / (PPQN/4));
+    sequencer->on_step_shuffled(0, step+debug_step_offset);
   }
 #endif
 
@@ -120,7 +127,8 @@ void pc_usb_midi_handle_note_off(uint8_t channel, uint8_t note, uint8_t velocity
 
 void setup() {
 
-  set_sys_clock_khz(150000, true);
+  // set_sys_clock_khz(150000, true);
+  set_sys_clock_khz(180000, true);
 
   #ifdef USE_TINYUSB
     setup_serial();
@@ -133,6 +141,12 @@ void setup() {
   //if (Serial) { Serial.println(F("done SetupComputerIO; now gonna setup_uclock()")); Serial.flush(); }
 
   output_wrapper.reset();
+
+  #ifdef ENABLE_LITTLEFS
+    // Must be mounted before any settings_load()/bank config load - those
+    // read/write via saveloadlib, which expects LittleFS already begun.
+    LittleFS.begin();
+  #endif
 
   setup_samples();
   current_settings = settings_load(); // load after bankManager.setup() inside setup_samples()
@@ -197,9 +211,10 @@ void setup() {
   #endif
 
   #ifdef ENABLE_ACCENTS
-    global_accent_source = new StepAccentSource(16);
+    // global_accent_source = new StepAccentSource(16);
+    global_accent_source = new SimpleAccentSource();
     const uint8_t strong_steps[] = {0, 4, 8, 12};
-    ((StepAccentSource*)global_accent_source)->set_pattern(strong_steps, 4);
+    // ((StepAccentSource*)global_accent_source)->set_pattern(strong_steps, 4);
   #endif
 
   // set up repeating timers to process tasks
@@ -230,9 +245,9 @@ void setup() {
             if (s == 0) {
                 Serial.printf("  Bank 0: compiled-in\n");
             } else {
-                const BankHeader *bh = bankManager.get_bank_header(s);
-                if (bh) Serial.printf("  Bank %d: '%s' (%u samples)\n",
-                    s, bh->bank_name, bh->num_samples);
+                const char *bname = bankManager.get_bank_name(s);
+                Serial.printf("  Bank %d: '%s' (%u slots used)\n",
+                    s, bname ? bname : "?", bankManager.get_bank_slot_count(s));
             }
         }
     }
@@ -243,7 +258,11 @@ void setup() {
 
 void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
   #ifdef USE_UCLOCK
-      ::ticks = in_ticks;
+      // this -1 is a hack that seems to make us sync better with usb_midi_clocker when the exact same midi-ox clock source 
+      // is used for both the usb_midi_clocker and the Compulidian.  
+      // Without it, the Compulidian seems to be a tick behind the usb_midi_clocker, which is annoying.
+      // TODO: The question is, which is correct, and what is the correct way to fix this?  
+      ::ticks = in_ticks - 1;
       // todo: hmm non-USE_UCLOCK mode doesn't actually use the in_ticks passed in here..?
   #endif
   //if (Serial) Serial.printf("ticked %u\n", ticks);
@@ -281,12 +300,12 @@ void __not_in_flash_func(loop)() {
       Serial.printf("Banks: active=%d  valid_count=%d\n",
           bankManager.active_bank(), bankManager.num_valid_banks());
       for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
-          uint32_t addr = flash_bank_xip_addr(slot);
-          const BankHeader *hdr = reinterpret_cast<const BankHeader *>(addr);
-          Serial.printf("  slot %d @ 0x%08X: %s  magic=0x%08X ver=%u n=%u name='%.*s'\n",
-              slot, addr,
+          const char *bname = bankManager.get_bank_name(slot);
+          Serial.printf("  slot %d: %s  name='%s' slots_used=%u\n",
+              slot,
               bankManager.is_bank_valid(slot) ? "VALID  " : "empty  ",
-              hdr->magic, hdr->version, hdr->num_samples, 31, hdr->bank_name);
+              bname ? bname : "",
+              bankManager.get_bank_slot_count(slot));
       }
       Settings s = settings_load();
       Serial.printf("Settings: active_bank=%u  magic=0x%08X\n", s.active_bank, s.magic);
@@ -356,7 +375,7 @@ void __not_in_flash_func(loop)() {
   // flash LEDs on the beat if muted
   if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks)) {
     output_wrapper.all_leds_on();
-  } else if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks,6)) {
+  } else if (ticked && output_wrapper.is_muted() && is_bpm_on_beat(ticks, PPQN/4)) {
     output_wrapper.all_leds_off();
   }
 

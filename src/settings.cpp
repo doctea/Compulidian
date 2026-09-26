@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <string.h>
 
+#ifdef ENABLE_LITTLEFS
+#include "live_settings.h"
+#else
 // Pico SDK flash programming API.
 // These functions call through ROM and are safe to call from C++ as long as
 // core 1 is paused and interrupts are disabled (handled in settings_save()).
@@ -12,6 +15,7 @@
 
 // earlephilhower Arduino-Pico multicore helpers.
 #include <RP2040.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // settings_defaults()
@@ -39,8 +43,42 @@ Settings settings_defaults() {
     return s;
 }
 
+#ifdef ENABLE_LITTLEFS
 // ---------------------------------------------------------------------------
-// settings_load()
+// settings_load() / settings_save() — saveloadlib/LittleFS backend.
+// Keeps the same by-value API as the legacy backend below so existing call
+// sites (main.cpp, bank_manager.cpp, configurator.h) are unaffected; only the
+// persistence mechanism changes. A single DeviceSettingsHost instance backs
+// SL_ROOT for the lifetime of the device.
+// ---------------------------------------------------------------------------
+static Settings g_settings_storage;
+static DeviceSettingsHost g_settings_host(&g_settings_storage);
+static bool g_settings_root_registered = false;
+
+static void ensure_settings_root() {
+    if (g_settings_root_registered) return;
+    g_settings_storage = settings_defaults();
+    sl_register_and_setup_root(&g_settings_host);
+    g_settings_root_registered = true;
+}
+
+Settings settings_load() {
+    ensure_settings_root();
+    sl_load_from_file(LIVE_SETTINGS_SAVE_PATH, SL_SCOPE_SYSTEM);
+    return g_settings_storage;
+}
+
+void settings_save(const Settings *s) {
+    ensure_settings_root();
+    if (s) g_settings_storage = *s;
+    sl_save_to_file(&g_settings_host, LIVE_SETTINGS_SAVE_PATH, SL_SCOPE_SYSTEM);
+}
+
+#else
+// ---------------------------------------------------------------------------
+// settings_load() / settings_save() — legacy raw-flash backend (no LittleFS).
+// Used on boards without ENABLE_LITTLEFS (e.g. the 2 MB env, which has no
+// flash headroom for a filesystem).
 // ---------------------------------------------------------------------------
 Settings settings_load() {
     const Settings *flash_s =
@@ -56,10 +94,6 @@ Settings settings_load() {
     // Flash sector is blank (0xFF) or contains stale data — return defaults.
     return settings_defaults();
 }
-
-// ---------------------------------------------------------------------------
-// settings_save()
-// ---------------------------------------------------------------------------
 
 // The actual erase+write must run from RAM because it disables XIP.
 // Mark the helper with __no_inline_not_in_flash_func so the linker places it
@@ -96,3 +130,4 @@ void settings_save(const Settings *s) {
     restore_interrupts(irq_state);
     rp2040.resumeOtherCore();
 }
+#endif // ENABLE_LITTLEFS
