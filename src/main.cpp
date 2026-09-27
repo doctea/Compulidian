@@ -207,6 +207,8 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
 
   //output_wrapper->sendClock();
 
+  parameter_manager->tick_sh();
+
   #ifdef ENABLE_EUCLIDIAN
       if (sequencer->is_running()) sequencer->on_tick(ticks);
       if (is_bpm_on_sixteenth(ticks) && output_processor->is_enabled()) {
@@ -226,6 +228,10 @@ void __not_in_flash_func(loop)() {
     bool cv_event_is_reset;
     uint32_t cv_event_observed_at_us;
     while (take_cv_clock_event(cv_event_is_reset, cv_event_observed_at_us)) {
+      // Serial.print(F("CV event observed at us: "));
+      // Serial.print(cv_event_observed_at_us);
+      // Serial.print(F(", is reset: "));
+      // Serial.println(cv_event_is_reset);
       if (cv_event_is_reset) {
         if (clock_mode != CLOCK_EXTERNAL_CV)
           change_clock_mode(CLOCK_EXTERNAL_CV);

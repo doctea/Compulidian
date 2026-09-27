@@ -5,6 +5,10 @@
 
 #include "sequencer/Euclidian/Sequencer.h"
 
+
+volatile uint32_t pulse_0_transitions;
+volatile uint32_t pulse_1_transitions;
+
 #ifdef USE_TINYUSB
 
   bool debug_enable_output_parameter_input = false;
@@ -35,7 +39,38 @@
         serial_input_buffer[serial_input_buffer_index] = 0;
         Serial.printf("\ngot '%s'\n", serial_input_buffer);
 
-        if (serial_input_buffer[0]=='l') {
+        if (strcmp(serial_input_buffer, "transitions")==0) {
+          Serial.printf("pulse_0_transitions: %lu\n", pulse_0_transitions);
+          Serial.printf("pulse_1_transitions: %lu\n", pulse_1_transitions);
+        } else if (strcmp(serial_input_buffer, "clock-internal")==0) {
+          Serial.println(F("Clock internal command received"));
+          change_clock_mode(ClockMode::CLOCK_INTERNAL);
+        } else if (strcmp(serial_input_buffer, "clock-external-cv")==0) {
+          Serial.println(F("Clock external command received"));
+          change_clock_mode(ClockMode::CLOCK_EXTERNAL_CV);
+        } else if (strcmp(serial_input_buffer, "clock-external-usb")==0) {
+          Serial.println(F("Clock external USB command received"));
+          change_clock_mode(ClockMode::CLOCK_EXTERNAL_USB_HOST);
+        } else if (strcmp(serial_input_buffer, "play")==0) {
+          Serial.println(F("Play command received"));
+          clock_start();
+        } else if (strcmp(serial_input_buffer, "stop")==0) {
+          Serial.println(F("Stop command received"));
+          clock_stop();
+        } else if (strcmp(serial_input_buffer, "help")==0) {
+          Serial.println(F("Available commands:"));
+          Serial.println(F("  d i <index>   - toggle debug on a parameter input"));
+          Serial.println(F("  s            - toggle sample interpolation on/off"));
+          Serial.println(F("  c            - toggle calculate mode between main loop and audio worker"));
+          Serial.println(F("  v            - toggle volume on/off"));
+          Serial.println(F("  V            - dump version/build information"));
+          Serial.println(F("  clock-internal       - set clock mode to internal"));
+          Serial.println(F("  clock-external-cv    - set clock mode to external CV"));
+          Serial.println(F("  clock-external-usb   - set clock mode to external USB host"));
+          Serial.println(F("  play         - start the clock"));
+          Serial.println(F("  stop         - stop the clock"));
+          Serial.println(F("  help         - show this help message"));
+        } else if (serial_input_buffer[0]=='l') {
           // list the track names
           Serial.println("l command received!"); Serial.flush();
           for (int i = 0 ; i < sequencer->get_number_patterns() ; i++) {

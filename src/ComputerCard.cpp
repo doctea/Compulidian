@@ -3,6 +3,9 @@
 #ifdef ENABLE_CLOCK_INPUT_CV
 	#include "clock.h"
 
+	extern volatile uint32_t pulse_0_transitions;
+	extern volatile uint32_t pulse_1_transitions;
+
 	struct CvClockEvent {
 		uint32_t observed_at_us;
 		bool reset;
@@ -155,6 +158,8 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	static int mux_state = 0;
 	static int norm_probe_count = 0;
 
+	static bool first_run = true;
+
 	// Internal variables for IIR filters on knobs/cv
 	static int32_t knobssm[4] = { 0, 0, 0, 0 };
 	static int32_t cvsm[2] = { 0, 0 };
@@ -217,12 +222,17 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	pulse[1] = !gpio_get(PULSE_2_INPUT);
 
 	#ifdef ENABLE_CLOCK_INPUT_CV
-		if (last_pulse[0] != pulse[0] && pulse[0]) {
-			enqueue_cv_clock_event(true);
+		if (!first_run) {
+			if (last_pulse[0] != pulse[0] && pulse[0]) {
+				pulse_0_transitions++;
+				enqueue_cv_clock_event(true);
+			}
+			if (last_pulse[1] != pulse[1] && pulse[1]) {
+				pulse_1_transitions++;
+				enqueue_cv_clock_event(false);
+			}
 		}
-		if (last_pulse[1] != pulse[1] && pulse[1]) {
-			enqueue_cv_clock_event(false);
-		}
+		first_run = false;
 	#endif
 
 	// Set knobs, with ~60Hz LPF
@@ -404,7 +414,7 @@ ComputerCard::ComputerCard()
 	gpio_set_dir(BOARD_ID_0, GPIO_IN);
 	gpio_set_dir(BOARD_ID_1, GPIO_IN);
 	gpio_set_dir(BOARD_ID_2, GPIO_IN);
-	hw = ProbeHardwareVersion();
+	hw = Unknown; //ProbeHardwareVersion();
 	
 	// USB host status pin
 	gpio_init(USB_HOST_STATUS);
@@ -456,9 +466,9 @@ ComputerCard::ComputerCard()
 	gpio_set_function(DAC_CS, GPIO_FUNC_SPI);
 
 	// Setup I2C for EEPROM
-	i2c_init(i2c0, 100 * 1000);
-	gpio_set_function(EEPROM_SDA, GPIO_FUNC_I2C);
-	gpio_set_function(EEPROM_SCL, GPIO_FUNC_I2C);
+	// i2c_init(i2c0, 100 * 1000);
+	// gpio_set_function(EEPROM_SDA, GPIO_FUNC_I2C);
+	// gpio_set_function(EEPROM_SCL, GPIO_FUNC_I2C);
 
 	// Setup CV PWM
 	// First, tell the CV pins that the PWM is in charge of the value.
@@ -490,7 +500,7 @@ ComputerCard::ComputerCard()
 #endif
 
 	// Read EEPROM calibration values
-	ReadEEPROM();
+	// ReadEEPROM();
 
 	// Read unique card ID
 	//flash_get_unique_id((uint8_t *) &uniqueID);
@@ -507,25 +517,25 @@ ComputerCard::ComputerCard()
 
 
 // Read a byte from EEPROM
-uint8_t ComputerCard::ReadByteFromEEPROM(unsigned int eeAddress)
-{
-	uint8_t deviceAddress = EEPROM_PAGE_ADDRESS | ((eeAddress >> 8) & 0x0F);
-	uint8_t data = 0xFF;
+// uint8_t ComputerCard::ReadByteFromEEPROM(unsigned int eeAddress)
+// {
+// 	uint8_t deviceAddress = EEPROM_PAGE_ADDRESS | ((eeAddress >> 8) & 0x0F);
+// 	uint8_t data = 0xFF;
 
-	uint8_t addr_low_byte = eeAddress & 0xFF;
-	i2c_write_blocking(i2c0, deviceAddress, &addr_low_byte, 1, false);
+// 	uint8_t addr_low_byte = eeAddress & 0xFF;
+// 	i2c_write_blocking(i2c0, deviceAddress, &addr_low_byte, 1, false);
 
-	i2c_read_blocking(i2c0, deviceAddress, &data, 1, false);
-	return data;
-}
+// 	i2c_read_blocking(i2c0, deviceAddress, &data, 1, false);
+// 	return data;
+// }
 
-// Read a 16-bit integer from EEPROM
-int ComputerCard::ReadIntFromEEPROM(unsigned int eeAddress)
-{
-	uint8_t highByte = ReadByteFromEEPROM(eeAddress);
-	uint8_t lowByte = ReadByteFromEEPROM(eeAddress + 1);
-	return (highByte << 8) | lowByte;
-}
+// // Read a 16-bit integer from EEPROM
+// int ComputerCard::ReadIntFromEEPROM(unsigned int eeAddress)
+// {
+// 	uint8_t highByte = ReadByteFromEEPROM(eeAddress);
+// 	uint8_t lowByte = ReadByteFromEEPROM(eeAddress + 1);
+// 	return (highByte << 8) | lowByte;
+// }
 
 uint16_t ComputerCard::CRCencode(const uint8_t *data, int length)
 {
@@ -549,70 +559,70 @@ uint16_t ComputerCard::CRCencode(const uint8_t *data, int length)
 }
 
 
-int ComputerCard::ReadEEPROM()
-{
-	// Set up default values in the calibration table,
-	// to be used if EEPROM read fails
-	calibrationTable[0][0].voltage = -20; // -2V
-	calibrationTable[0][0].dacSetting = 347700;
-	calibrationTable[0][1].voltage = 0; // 0V
-	calibrationTable[0][1].dacSetting = 261200;
-	calibrationTable[0][2].voltage = 20; // +2V
-	calibrationTable[0][2].dacSetting = 174400;
+// int ComputerCard::ReadEEPROM()
+// {
+// 	// Set up default values in the calibration table,
+// 	// to be used if EEPROM read fails
+// 	calibrationTable[0][0].voltage = -20; // -2V
+// 	calibrationTable[0][0].dacSetting = 347700;
+// 	calibrationTable[0][1].voltage = 0; // 0V
+// 	calibrationTable[0][1].dacSetting = 261200;
+// 	calibrationTable[0][2].voltage = 20; // +2V
+// 	calibrationTable[0][2].dacSetting = 174400;
 
-	calibrationTable[1][0].voltage = -20; // -2V
-	calibrationTable[1][0].dacSetting = 347700;
-	calibrationTable[1][1].voltage = 0; // 0V
-	calibrationTable[1][1].dacSetting = 261200;
-	calibrationTable[1][2].voltage = 20; // +2V
-	calibrationTable[1][2].dacSetting = 174400;
+// 	calibrationTable[1][0].voltage = -20; // -2V
+// 	calibrationTable[1][0].dacSetting = 347700;
+// 	calibrationTable[1][1].voltage = 0; // 0V
+// 	calibrationTable[1][1].dacSetting = 261200;
+// 	calibrationTable[1][2].voltage = 20; // +2V
+// 	calibrationTable[1][2].dacSetting = 174400;
 
-	if (ReadIntFromEEPROM(EEPROM_ADDR_ID) != EEPROM_VAL_ID)
-	{
-		return 1;
-	}
-	uint8_t buf[EEPROM_NUM_BYTES];
-	for (int i = 0; i < EEPROM_NUM_BYTES; i++)
-	{
-		buf[i] = ReadByteFromEEPROM(i);
-	}
+// 	if (ReadIntFromEEPROM(EEPROM_ADDR_ID) != EEPROM_VAL_ID)
+// 	{
+// 		return 1;
+// 	}
+// 	uint8_t buf[EEPROM_NUM_BYTES];
+// 	for (int i = 0; i < EEPROM_NUM_BYTES; i++)
+// 	{
+// 		buf[i] = ReadByteFromEEPROM(i);
+// 	}
 
 
-	uint16_t calculatedCRC = CRCencode(buf, 86);
-	uint16_t foundCRC = ((uint16_t)buf[EEPROM_ADDR_CRC_H] << 8) | buf[EEPROM_ADDR_CRC_L];
+// 	uint16_t calculatedCRC = CRCencode(buf, 86);
+// 	uint16_t foundCRC = ((uint16_t)buf[EEPROM_ADDR_CRC_H] << 8) | buf[EEPROM_ADDR_CRC_L];
 
-	if (calculatedCRC != foundCRC)
-	{
-		return 1;
-	}
+// 	if (calculatedCRC != foundCRC)
+// 	{
+// 		return 1;
+// 	}
 
-	int bufferIndex = 4;
+// 	int bufferIndex = 4;
 
-	for (uint8_t channel = 0; channel < calMaxChannels; channel++)
-	{
-		int channelOffset = bufferIndex + (41 * channel); // channel 0 = 4, channel 1 = 45
-		numCalibrationPoints[channel] = buf[channelOffset++];
-		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
-		{
-			// Unpack Pack targetVoltage (int8_t) from buf
-			int8_t targetVoltage = (int8_t)buf[channelOffset++];
+// 	for (uint8_t channel = 0; channel < calMaxChannels; channel++)
+// 	{
+// 		int channelOffset = bufferIndex + (41 * channel); // channel 0 = 4, channel 1 = 45
+// 		numCalibrationPoints[channel] = buf[channelOffset++];
+// 		for (uint8_t point = 0; point < numCalibrationPoints[channel]; point++)
+// 		{
+// 			// Unpack Pack targetVoltage (int8_t) from buf
+// 			int8_t targetVoltage = (int8_t)buf[channelOffset++];
 
-			// Unack dacSetting (uint32_t) from buf (4 bytes)
-			uint32_t dacSetting = 0;
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 24; // MSB
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 16;
-			dacSetting |= ((uint32_t)buf[channelOffset++]) << 8;
-			dacSetting |= ((uint32_t)buf[channelOffset++]); // LSB
+// 			// Unack dacSetting (uint32_t) from buf (4 bytes)
+// 			uint32_t dacSetting = 0;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 24; // MSB
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 16;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]) << 8;
+// 			dacSetting |= ((uint32_t)buf[channelOffset++]); // LSB
 
-			// Write settings into calibration table
-			calibrationTable[channel][point].voltage = targetVoltage;
-			calibrationTable[channel][point].dacSetting = dacSetting;
-		}
-		CalcCalCoeffs(channel);
-	}
+// 			// Write settings into calibration table
+// 			calibrationTable[channel][point].voltage = targetVoltage;
+// 			calibrationTable[channel][point].dacSetting = dacSetting;
+// 		}
+// 		CalcCalCoeffs(channel);
+// 	}
 
-	return 0;
-}
+// 	return 0;
+// }
 
 void ComputerCard::CalcCalCoeffs(int channel)
 {
