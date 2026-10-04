@@ -1,9 +1,44 @@
 #include "ComputerCard.h"
 
 #ifdef ENABLE_CLOCK_INPUT_CV
-	extern volatile bool cv_clock_ticked;
-	extern volatile bool cv_clock_reset;
 	#include "clock.h"
+
+	extern volatile uint32_t pulse_0_transitions;
+	extern volatile uint32_t pulse_1_transitions;
+
+	struct CvClockEvent {
+		uint32_t observed_at_us;
+		bool reset;
+	};
+
+	static constexpr uint8_t CV_CLOCK_EVENT_QUEUE_SIZE = 8;
+	static CvClockEvent cv_clock_events[CV_CLOCK_EVENT_QUEUE_SIZE];
+	static volatile uint8_t cv_clock_event_head = 0;
+	static volatile uint8_t cv_clock_event_tail = 0;
+	volatile uint32_t cv_clock_event_overflow = 0;
+
+	static void enqueue_cv_clock_event(bool reset) {
+		uint8_t next_head = (cv_clock_event_head + 1) % CV_CLOCK_EVENT_QUEUE_SIZE;
+		if (next_head == cv_clock_event_tail) {
+			cv_clock_event_overflow++;
+			clock_report_external_event_overflow();
+			return;
+		}
+
+		cv_clock_events[cv_clock_event_head] = {micros(), reset};
+		cv_clock_event_head = next_head;
+	}
+
+	bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us) {
+		if (cv_clock_event_tail == cv_clock_event_head)
+			return false;
+
+		CvClockEvent event = cv_clock_events[cv_clock_event_tail];
+		cv_clock_event_tail = (cv_clock_event_tail + 1) % CV_CLOCK_EVENT_QUEUE_SIZE;
+		reset = event.reset;
+		observed_at_us = event.observed_at_us;
+		return true;
+	}
 #endif
 
 ComputerCard *ComputerCard::thisptr;
@@ -123,6 +158,8 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	static int mux_state = 0;
 	static int norm_probe_count = 0;
 
+	static bool first_run = true;
+
 	// Internal variables for IIR filters on knobs/cv
 	static int32_t knobssm[4] = { 0, 0, 0, 0 };
 	static int32_t cvsm[2] = { 0, 0 };
@@ -185,22 +222,17 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	pulse[1] = !gpio_get(PULSE_2_INPUT);
 
 	#ifdef ENABLE_CLOCK_INPUT_CV
-		if (last_pulse[1] != pulse[1] && pulse[1]) {
-			Serial.printf("Pulse 2 (RESET) rising edge during tick %u\n", ticks);
-			cv_clock_reset = true;
-			if (clock_mode!=CLOCK_EXTERNAL_CV) {
-				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
-				change_clock_mode(CLOCK_EXTERNAL_CV);
+		if (!first_run) {
+			if (last_pulse[0] != pulse[0] && pulse[0]) {
+				pulse_0_transitions++;
+				enqueue_cv_clock_event(true);
 			}
-		} else if (last_pulse[0] != pulse[0] && !pulse[0]) {
-			// Serial.println("Pulse 1 rising edge");
-			Serial.printf("Pulse 1 (clock) rising edge during tick %u\n", ticks);
-			cv_clock_ticked = true;
-			if (clock_mode!=CLOCK_EXTERNAL_CV) {
-				// Serial.println("WARNING: received a CV clock tick, but we're not in CLOCK_EXTERNAL_CV mode!");
-				change_clock_mode(CLOCK_EXTERNAL_CV);
+			if (last_pulse[1] != pulse[1] && pulse[1]) {
+				pulse_1_transitions++;
+				enqueue_cv_clock_event(false);
 			}
 		}
+		first_run = false;
 	#endif
 
 	// Set knobs, with ~60Hz LPF

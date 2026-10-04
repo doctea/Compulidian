@@ -29,6 +29,10 @@ extern WorkshopOutputWrapper output_wrapper;
 #include "sequencer/sequencing.h"
 #include "sequencer/Euclidian/Sequencer.h"
 
+#ifdef ENABLE_SHUFFLE
+    #include "sequencer/shuffle.h"
+#endif
+
 //#include "Wire.h"
 bool cv_input_enabled = true;
 
@@ -161,16 +165,14 @@ void setup_parameter_inputs() {
     Serial.println("just did do setDefaultParameterConnections().."); Serial.flush();
     */
 
-    int parameter_index = 0;
     #ifdef ENABLE_SHUFFLE
-        FloatParameter *shuffle_amount_parameter = sequencer->getParameterByName("Shuffle amount 0");
+        FloatParameter *shuffle_amount_parameter = shuffle_pattern_wrapper.getParameters()->getByName("Shuffle amount 0");
         if (shuffle_amount_parameter==nullptr) {
             Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
         } else {
             // shuffle_amount_parameter->updateValueFromNormal(0.2f);
             // sequencer->set_shuffle_enabled(true);
             shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
-            parameter_index++;
         }
     #endif
 
@@ -187,7 +189,7 @@ void setup_parameter_inputs() {
     euclidian_density_2->set_slot_x_all(1, vpi_cv_2, 1.0f, MOD_SLOT_BI_NATIVE);
 
     /*
-    FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
+    FloatParameter *mutation_amount = sequencer->getParameterByName("Mutation amount 0");
     //mutation_amount->debug = true;
     mutation_amount->set_slot_0_input(vpi_knob_y);
     mutation_amount->set_slot_0_amount(1.0f);
@@ -208,15 +210,6 @@ void setup_parameter_inputs() {
     bpm_parameter->set_slot_x_all(0, vpi_knob_y, 1.0f, UNIPOLAR);
     parameter_manager->addParameter(bpm_parameter);
 
-    /*LDataParameter<float> *pitch_parameter = new LDataParameter<float>(
-        (char*)"Pitch", 
-        [=](float v) -> void {
-            sw.global_pitch = 4096.0 * v;
-            Serial.printf("Got v %f, so global_pitch set to %i\n", v, sw.global_pitch);
-        },
-        [=]() -> float { return sw.global_pitch / 4096; },
-        0.5, 1.5
-    );*/
     LDataParameter<int16_t> *pitch_parameter = new LDataParameter<int16_t>(
         (char*)"Pitch", 
         [=](int16_t v) -> void {

@@ -105,13 +105,7 @@ void global_on_restart() {
 #endif
 
 #ifdef ENABLE_CLOCK_INPUT_CV
-  extern volatile bool cv_clock_ticked;
-  extern volatile bool cv_clock_reset;
-  bool check_cv_clock_ticked() {
-    bool was_ticked = cv_clock_ticked;
-    cv_clock_ticked = false;
-    return was_ticked;
-  }
+  bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us);
 #endif
 
 void setup_usb();
@@ -225,9 +219,9 @@ void setup() {
     add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
   #endif
 
-  #ifdef ENABLE_CLOCK_INPUT_CV
-    set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
-  #endif
+  // #ifdef ENABLE_CLOCK_INPUT_CV
+  //   set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
+  // #endif
 
   #ifdef USE_UCLOCK
     //if (Serial) Serial.println("Starting uClock...");
@@ -285,8 +279,6 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
   #endif
 }
 
-
-
 void __not_in_flash_func(loop)() {
   // Print a status summary whenever a serial terminal (re-)connects.
   // boot-time prints happen before USB CDC is ready, so this is the only
@@ -324,6 +316,24 @@ void __not_in_flash_func(loop)() {
 
   // todo: will need this if/when we convert the WorkshopOutputWrapper to use the ring buffer that Microlidian now uses
   //output_wrapper->drain();
+
+  #ifdef ENABLE_CLOCK_INPUT_CV
+    bool cv_event_is_reset;
+    uint32_t cv_event_observed_at_us;
+    while (take_cv_clock_event(cv_event_is_reset, cv_event_observed_at_us)) {
+      // Serial.print(F("CV event observed at us: "));
+      // Serial.print(cv_event_observed_at_us);
+      // Serial.print(F(", is reset: "));
+      // Serial.println(cv_event_is_reset);
+      if (cv_event_is_reset) {
+        if (clock_mode != CLOCK_EXTERNAL_CV)
+          change_clock_mode(CLOCK_EXTERNAL_CV);
+        clock_receive_external_reset(CLOCK_EXTERNAL_CV);
+      } else {
+        clock_receive_external_pulse_at(CLOCK_EXTERNAL_CV, cv_event_observed_at_us);
+      }
+    }
+  #endif
 
   ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) 
   {
