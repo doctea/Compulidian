@@ -74,7 +74,8 @@ volatile uint32_t pulse_1_transitions;
           clock_stop();
         } else if (strcmp(serial_input_buffer, "help")==0) {
           Serial.println(F("Available commands:"));
-          Serial.println(F("  d i <index>   - toggle debug on a parameter input"));
+          Serial.println(F("  I            - stream parameter input info to console"));
+          Serial.println(F("  d i <index>  - toggle debug on a parameter input"));
           Serial.println(F("  s            - toggle sample interpolation on/off"));
           Serial.println(F("  c            - toggle calculate mode between main loop and audio worker"));
           Serial.println(F("  v            - toggle volume on/off"));
