@@ -129,6 +129,7 @@ void setup1()
   delay(500);
   Serial.println(F("setup1 started!"));
 
+  sw.EnableNormalisationProbe();
   sw.Run();
 }
 

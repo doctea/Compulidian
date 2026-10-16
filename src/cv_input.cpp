@@ -114,8 +114,7 @@ void setup_parameter_inputs() {
     ); 
     //vpi_hold_switch->debug = true;
     ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput(
-        (char*)"Switch", "CV Inputs",  parameter_manager
-        ->voltage_sources->get(5), 
+        (char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 
         0.000005, 
         UNIPOLAR, 
         true, 
@@ -172,6 +171,7 @@ void setup_parameter_inputs() {
         } else {
             // shuffle_amount_parameter->updateValueFromNormal(0.2f);
             // sequencer->set_shuffle_enabled(true);
+            shuffle_amount_parameter->updateValueFromNormal(0.5f);
             shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
         }
     #endif

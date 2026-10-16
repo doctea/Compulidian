@@ -89,18 +89,13 @@ void global_on_restart() {
   }
 #endif
 
-#ifdef USE_TINYUSB
-  repeating_timer_t usb_timer;
-  bool usb_repeating_callback(repeating_timer_t *rt) {
-    while(USBMIDI.read()) {}
-    return true;
-  }
-#endif
-
 #ifdef ENABLE_SHUFFLE
   void shuffled_step_callback(uint32_t step) {
-    if (Serial) Serial.printf("shuffled_step_callback() called with step=%lu, while ticks is %ld (step=%ld)\n", step, ticks, ticks, ticks / (PPQN/4));
+    // if (Serial) Serial.printf("shuffled_step_callback() called with step=%lu, while ticks is %ld (step=%ld)\n", step, ticks, ticks, ticks / (PPQN/4));
     sequencer->on_step_shuffled(0, step+debug_step_offset);
+    if (output_processor->is_enabled()) {
+      output_processor->process();
+    }
   }
 #endif
 
@@ -215,9 +210,6 @@ void setup() {
   #ifdef ENABLE_PARAMETERS
     add_repeating_timer_ms(5, parameter_repeating_callback, nullptr, &parameter_timer);
   #endif
-  #ifdef USE_TINYUSB
-    add_repeating_timer_us(250, usb_repeating_callback, nullptr, &usb_timer);
-  #endif
 
   // #ifdef ENABLE_CLOCK_INPUT_CV
   //   set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
@@ -252,11 +244,7 @@ void setup() {
 
 void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
   #ifdef USE_UCLOCK
-      // this -1 is a hack that seems to make us sync better with usb_midi_clocker when the exact same midi-ox clock source 
-      // is used for both the usb_midi_clocker and the Compulidian.  
-      // Without it, the Compulidian seems to be a tick behind the usb_midi_clocker, which is annoying.
-      // TODO: The question is, which is correct, and what is the correct way to fix this?  
-      ::ticks = in_ticks - 1;
+      ::ticks = in_ticks;
       // todo: hmm non-USE_UCLOCK mode doesn't actually use the in_ticks passed in here..?
   #endif
   //if (Serial) Serial.printf("ticked %u\n", ticks);
@@ -309,6 +297,9 @@ void __not_in_flash_func(loop)() {
   #ifdef USE_TINYUSB
     // Service USB + pending SysEx responses even if config mode is active.
     tud_task();
+    for (uint32_t read_count = 0; read_count < 64 && usb_midi.available(); ++read_count) {
+      USBMIDI.read();
+    }
     process_pending_sysex_responses();
   #endif
 
