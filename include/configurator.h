@@ -10,6 +10,10 @@
 #include "workshop_output.h"
 #include "outputs/output_processor.h"
 
+#ifdef USE_TINYUSB
+#include "arduino/Adafruit_TinyUSB_API.h"
+#endif
+
 #ifdef ENABLE_LITTLEFS
 #include <LittleFS.h>
 #endif
@@ -223,7 +227,7 @@ static bool dequeue_pending_sysex(PendingSysexItem *out) {
 // Write bytes ourselves with backpressure (retry + tud_task() to drain) instead.
 static bool midi_write_byte_blocking_(uint8_t b, uint32_t start_ms) {
     while (usb_midi.write(b) != 1) {
-        tud_task();
+        TinyUSB_Device_Task();
         if ((millis() - start_ms) > 2000) return false; // host likely gone; don't hang forever
     }
     return true;

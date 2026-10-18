@@ -9,3 +9,46 @@ in the development cycle.
 
 More information about PlatformIO Unit Testing:
 - https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+
+Native USB MIDI regression checks (Python 3 and g++ or clang++; use WSL):
+
+	python3 test/test_usb_midi_tx.py
+	python3 test/test_output_batching.py --check-baseline
+
+These compile the actual project callbacks, MIDI output logic, and transmit
+queue with lightweight host-side stubs. They do not replace a firmware build
+or hardware timing/stress tests. If the saved checkpoint archive is available,
+it supplies negative controls for unsafe ISR transmission and split batching.
+The batching test stubs event generation; it does not cover direct process()
+calls made by shared-library patterns.
+
+Workshop note echoes now enter a 128-packet SDK queue, initialized in setup.
+Producers are the project's core-0 foreground and interrupt callbacks. USB
+transmission drains only in unmasked core-0 foreground code, before and after
+MIDI reception, with at most 64 packets per drain call. Local gates and samples
+remain immediate. USB backpressure retains the unsent packet; SysEx defers the
+drain rather than interleaving note packets with a frame.
+
+If the queue overflows, it discards pending echoes, suppresses new echoes until
+recovery completes, and sends All Sound Off (CC 120) on all 16 MIDI channels.
+This deliberately silences external MIDI instead of silently losing note-offs.
+Local playback continues. Inspect usb_midi_tx_queue.overflow_count and
+usb_midi_tx_queue.dropped_count in the debugger. This guards Workshop note TX;
+it does not prove every other TinyUSB/CDC entry point is interrupt-safe.
+
+The note wrapper no longer prints over CDC from note callbacks or sample
+lookup, including invalid sample paths. The native test uses the actual lookup
+and note methods with debugging enabled and a connected console to catch
+accidental interrupt-side serial writes. Parameter streaming stays foreground.
+
+The fork's task fix and RAM tracing are separate. Tracing defaults off; the
+rpipico_16mb_usb_trace environment enables it explicitly. Run the recorder and
+task-routing checks from the project directory with:
+
+	python3 lib/Adafruit_TinyUSB_Arduino/tools/test_pico_trace.py
+
+Hardware follow-up: repeat the MIDI/CDC stress in rpipico_16mb without tracing,
+check repeated Start/Stop and note-offs, reconnect USB, and test an open console
+whose host stops reading. Monitor the queue overflow/drop counters under load.
+RP2350 is not yet validated. The extreme-tempo reacquisition glitch is separate
+from the captured USB lockups and has not been diagnosed here.

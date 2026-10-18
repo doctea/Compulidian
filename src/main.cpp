@@ -49,10 +49,24 @@ int debug_step_offset = 0;
 
 WorkshopOutputWrapper output_wrapper(&sw);
 
+#ifdef USE_TINYUSB
+USBMIDITxQueue usb_midi_tx_queue;
+#endif
+
 volatile std::atomic<bool> started = false;
 volatile std::atomic<bool> ticked = false;
 
 void do_tick(uint32_t ticks);
+
+static bool output_processing_pending = false;
+
+void process_pending_outputs(uint32_t) {
+  if (!output_processing_pending) return;
+  output_processing_pending = false;
+  if (output_processor->is_enabled()) {
+    output_processor->process();
+  }
+}
 
 #ifdef USE_TINYUSB
   // serial console to host, for debug etc
@@ -93,9 +107,7 @@ void global_on_restart() {
   void shuffled_step_callback(uint32_t step) {
     // if (Serial) Serial.printf("shuffled_step_callback() called with step=%lu, while ticks is %ld (step=%ld)\n", step, ticks, ticks, ticks / (PPQN/4));
     sequencer->on_step_shuffled(0, step+debug_step_offset);
-    if (output_processor->is_enabled()) {
-      output_processor->process();
-    }
+    output_processing_pending = true;
   }
 #endif
 
@@ -120,6 +132,7 @@ void setup() {
   set_sys_clock_khz(180000, true);
 
   #ifdef USE_TINYUSB
+    usb_midi_tx_queue.begin();
     setup_serial();
     setup_usb();
     setup_midi();
@@ -167,6 +180,7 @@ void setup() {
     output_processor->configure_sequencer(sequencer);
     ((EuclidianSequencer*)sequencer)->initialise_patterns();
     ((EuclidianSequencer*)sequencer)->reset_patterns();
+    uClock.setOnOutputPPQNEnd(process_pending_outputs);
   #endif
 
   #ifdef ENABLE_PARAMETERS
@@ -261,8 +275,8 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
 
   #ifdef ENABLE_EUCLIDIAN
       if (sequencer->is_running()) sequencer->on_tick(ticks);
-      if (is_bpm_on_sixteenth(ticks) && output_processor->is_enabled()) {
-          output_processor->process();
+      if (is_bpm_on_sixteenth(ticks)) {
+        output_processing_pending = true;
       }
   #endif
 }
@@ -296,10 +310,12 @@ void __not_in_flash_func(loop)() {
 
   #ifdef USE_TINYUSB
     // Service USB + pending SysEx responses even if config mode is active.
-    tud_task();
+    TinyUSB_Device_Task();
+    usb_midi_tx_queue.drain(usb_midi, g_usbmidi_tx_busy);
     for (uint32_t read_count = 0; read_count < 64 && usb_midi.available(); ++read_count) {
       USBMIDI.read();
     }
+    usb_midi_tx_queue.drain(usb_midi, g_usbmidi_tx_busy);
     process_pending_sysex_responses();
   #endif
 

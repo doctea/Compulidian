@@ -8,9 +8,9 @@
 
 #include "Drums.h"
 
-#include <SimplyAtomic.h>
-
 #ifdef USE_TINYUSB
+    #include "usb_midi_tx.h"
+    extern USBMIDITxQueue usb_midi_tx_queue;
     extern Adafruit_USBD_MIDI usb_midi;
     extern midi::MidiInterface<midi::SerialMIDI<Adafruit_USBD_MIDI>> USBMIDI;
 #endif
@@ -114,7 +114,6 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         for (int i = 0 ; i < NUM_VOICES ; i++) {
             int_fast8_t sample_number = voice[i].sample;
             if (sample_number < 0 || sample_number >= NUM_SAMPLES) {
-                if (Serial) Serial.printf("get_voice_number_for_note(%i) invalid sample number %i\n", note, sample_number);
                 continue;
             }
             sample_t *cs = &sample[sample_number];
@@ -132,31 +131,13 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
     }
 
     virtual void sendNoteOn(uint8_t pitch, uint8_t velocity, uint8_t channel) {
-        //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i)\n", pitch, velocity, channel);
         if (this->muted) {
             return;
         }
         #ifdef USE_TINYUSB
-            // Skip the echo (not the actual trigger below) if a SysEx frame is
-            // mid-transmission - interleaving raw bytes here would corrupt it.
-            if (!g_usbmidi_tx_busy) USBMIDI.sendNoteOn(pitch, velocity, channel);
+            usb_midi_tx_queue.enqueue_note(true, pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
-        if (debug)
-            // this oddly crashes!
-            if (Serial) { 
-                //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
-                //Serial.flush();
-                ATOMIC() {
-                    //Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) aka %s to output_number %i\n", pitch, velocity, channel, get_note_name_c(pitch, channel), output_number);
-                    Serial.printf("WorkshopOutputTarget::sendNoteOn(");
-                    Serial.printf("%i, ", pitch);
-                    Serial.printf("%i, ", velocity);
-                    Serial.printf("%i) aka ", channel);
-                    Serial.printf("%s ", get_note_name_c(pitch, channel));
-                    Serial.printf("to output_number %i\n", output_number);
-                }
-            }
 
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
             sw->LedOn(output_number % sw->numLeds);
@@ -166,7 +147,6 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
 
         int8_t voice_number = get_voice_number_for_note(pitch);
         if (channel==GM_CHANNEL_DRUMS && voice_number >= 0 && voice_number < NUM_VOICES) {
-            if (this->debug && Serial) Serial.printf("Playing sample %i aka %s\n", voice_number, sample[voice[voice_number].sample].sname);
             voice[voice_number].sampleindex = 0;
             if (sw->enable_volume) {
                 voice[voice_number].level = velocity;
@@ -175,18 +155,14 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
                 // voice[voice_number].level = sample[voice[voice_number].sample].play_volume / 2; // set the velocity for the sample
             }
             //sample[voice_number].play_volume = velocity; // set the velocity for the sample
-        } else {
-            if (this->debug && Serial) Serial.printf("WorkshopOutputTarget::sendNoteOn(%i, %i, %i) got invalid voice_number %i\n", pitch, velocity, channel, voice_number);
-            //Serial.flush();
         }
     }
     virtual void sendNoteOff(uint8_t pitch, uint8_t velocity, uint8_t channel) {
         #ifdef USE_TINYUSB
-            if (!g_usbmidi_tx_busy) USBMIDI.sendNoteOff(pitch, velocity, channel);
+            usb_midi_tx_queue.enqueue_note(false, pitch, velocity, channel);
         #endif
         int8_t output_number = get_output_number_for_note(pitch);
 
-        if (this->debug && Serial) Serial.printf("WorkshopOutputTarget::sendNoteOff(%i, %i, %i) to output_number %i\n", pitch, velocity, channel, output_number);
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
             sw->LedOff(output_number % sw->numLeds);
 
