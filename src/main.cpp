@@ -41,7 +41,8 @@
 
 #include <string.h>
 #include <SimplyAtomic.h>
-#include <RP2040.h>
+// #include <RP2040.h>
+#include "midi_usb/usb_midi_tx.h"
 
 #include "configurator.h"
 
@@ -50,7 +51,7 @@ int debug_step_offset = 0;
 WorkshopOutputWrapper output_wrapper(&sw);
 
 #ifdef USE_TINYUSB
-USBMIDITxQueue usb_midi_tx_queue;
+  USBMIDITxQueue usb_midi_tx_queue;
 #endif
 
 volatile std::atomic<bool> started = false;

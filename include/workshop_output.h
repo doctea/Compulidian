@@ -9,7 +9,7 @@
 #include "Drums.h"
 
 #ifdef USE_TINYUSB
-    #include "usb_midi_tx.h"
+    #include "midi_usb/usb_midi_tx.h"
     extern USBMIDITxQueue usb_midi_tx_queue;
     extern Adafruit_USBD_MIDI usb_midi;
     extern midi::MidiInterface<midi::SerialMIDI<Adafruit_USBD_MIDI>> USBMIDI;
