@@ -175,7 +175,7 @@ void setup() {
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
     output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
-    sequencer = new EuclidianSequencer(output_processor->nodes, output_processor->nodes->size());
+    sequencer = new EuclidianSequencer(output_processor->nodes, output_processor->nodes->size(), NUM_GLOBAL_DENSITY_GROUPS);
     sequencer->debug = true;
     output_processor->configure_sequencer(sequencer);
     ((EuclidianSequencer*)sequencer)->initialise_patterns();
