@@ -247,6 +247,7 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 
 	// Set switch value
 	switchVal = static_cast<Switch>((knobs[3]>1000) + (knobs[3]>3000));
+	if (knob == 3) switchInitialized = true;
 	if (startupCounter)
 	{
 		// Don't detect switch changes in first few cycles

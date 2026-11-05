@@ -27,6 +27,7 @@ public:
         ISaveableSettingHost::setup_saveable_settings();
 
         register_setting(new VarSetting<uint8_t>("active_bank", "DeviceSettings", &target->active_bank), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<MomentaryRole>("momentary_role", "DeviceSettings", &target->momentary_role), SL_SCOPE_SYSTEM);
 
         for (int i = 0; i < 4; i++) {
             char lbl[24];

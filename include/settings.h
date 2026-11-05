@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "device_controls.h"
 
 // Magic number written at the start of a valid settings block.
 #define SETTINGS_MAGIC   0x43535447u  // "CSTG"
@@ -48,7 +49,8 @@ struct OutputConfig {
 //   0   magic           4 B
 //   4   version         4 B
 //   8   active_bank     1 B
-//   9   reserved        3 B
+//   9   momentary_role  1 B
+//  10   reserved        2 B
 //  12   outputs[4]     16 B   (4 × OutputConfig)
 //  28   cv_input_role   2 B
 //  30   knob_role       3 B
@@ -59,7 +61,8 @@ struct Settings {
     uint32_t    magic;              // SETTINGS_MAGIC
     uint32_t    version;            // SETTINGS_VERSION
     uint8_t     active_bank;        // 0 = compiled-in bank, 1-4 = flash bank slot
-    uint8_t     reserved[3];        // must be 0
+    MomentaryRole momentary_role;
+    uint8_t     reserved[2];        // must be 0
     OutputConfig outputs[4];        // pulse1, pulse2, cv1, cv2
     InputRole   cv_input_role[2];   // role of CV1 and CV2 inputs
     InputRole   knob_role[3];       // role of Main, X, Y knobs

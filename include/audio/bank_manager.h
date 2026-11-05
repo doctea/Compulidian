@@ -73,6 +73,11 @@ public:
     // (1..MAX_FLASH_BANKS). Returns 0 if the slot is out of range or not valid.
     int get_bank_slot_count(int slot) const;
 
+    size_t compiled_voice_count() const { return compiled_num_voices_; }
+    int compiled_voice_note(size_t index) const {
+        return index < compiled_num_voices_ ? compiled_midinote_[index] : -1;
+    }
+
     // Re-scans a single bank slot's config file (e.g. after a live SysEx
     // upload) and, if that slot is the currently active bank, hot-reloads
     // its sample assignments into the running audio engine without a
@@ -92,9 +97,9 @@ public:
     // -----------------------------------------------------------------------
 
     // Silences all voices, swaps sample_data[] pointers to the new bank,
-    // and updates Settings::active_bank in flash.
+    // and optionally updates Settings::active_bank in flash.
     // Returns false if `n` is not a valid bank index.
-    bool switch_bank(int n);
+    bool switch_bank(int n, bool persist = true);
 
 private:
     // -----------------------------------------------------------------------

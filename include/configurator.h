@@ -84,6 +84,8 @@
 // [115..146] bank name for slot 4
 #define SYSEX_DATA_LEN    19
 #define SYSEX_BANK_NAME   32   // bytes per bank name in the SysEx response
+#define SYSEX_CONFIG_ROLE_OFFSET (SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME)
+#define SYSEX_CONFIG_PAYLOAD_LEN (SYSEX_CONFIG_ROLE_OFFSET + 1)
 // Raw chunk size must fit in 14 bits (encoded as two 7-bit bytes) - see send_bank_chunk_sysex().
 // Kept moderate (vs. e.g. 1024+) to bound stack usage of the payload buffers below.
 // This is the DOWNLOAD (device -> browser) direction only - send_sysex_frame()'s
@@ -115,11 +117,11 @@
 #define SYSEX_SAMPLES_ENTRIES_PER_CHUNK 8
 #define SYSEX_SAMPLES_CHUNK_RAW_BYTES (SYSEX_SAMPLES_ENTRIES_PER_CHUNK * SAMPLESTORE_ENTRY_SIZE)
 
-// Slot-info response: one byte per note/channel, one length byte + label per
-// slot. Labels are truncated - they're only for display, not identity.
+// Slot-info response: note/channel/label per output slot, followed by the
+// compiled-voice count and original notes in compiled-voice index order.
 #define SYSEX_SLOT_LABEL_MAX      23
 #define SYSEX_MAX_SLOTS_REPORTED  32
-#define SYSEX_SLOTS_MAX_PAYLOAD   (1 + SYSEX_MAX_SLOTS_REPORTED * (3 + SYSEX_SLOT_LABEL_MAX))
+#define SYSEX_SLOTS_MAX_PAYLOAD   (1 + SYSEX_MAX_SLOTS_REPORTED * (3 + SYSEX_SLOT_LABEL_MAX) + 1 + BANK_MANAGER_MAX_VOICE_SLOTS)
 
 // Sample metadata file (Phase F.4): opaque byte streaming, same pattern as
 // the bank-config chunk pair but for one fixed file (no slot byte needed).
@@ -716,6 +718,13 @@ static void send_slots_info_sysex(uint8_t req_id) {
         pos += label_len;
     }
 
+    size_t compiled_count = bankManager.compiled_voice_count();
+    if (compiled_count > BANK_MANAGER_MAX_VOICE_SLOTS) compiled_count = BANK_MANAGER_MAX_VOICE_SLOTS;
+    payload[pos++] = (uint8_t)compiled_count;
+    for (size_t index = 0; index < compiled_count; ++index) {
+        payload[pos++] = (uint8_t)bankManager.compiled_voice_note(index) & 0x7F;
+    }
+
     send_sysex_frame(SYSEX_TYPE_SLOTS_INFO_RESP, req_id, SYSEX_STATUS_OK, payload, pos);
 }
 
@@ -768,10 +777,42 @@ static void send_samples_chunk_sysex(uint8_t req_id, uint16_t chunk_idx) {
     send_sysex_frame(SYSEX_TYPE_SAMPLES_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_SAMPLES_CHUNK_HEADER_BYTES + raw_len * 2));
 }
 
+static void handle_set_config_(uint8_t req_id, const uint8_t *data, unsigned length) {
+    if (length < SYSEX_DATA_LEN) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+        return;
+    }
+    if (data[0] > FLASH_MAX_BANKS
+        || (length > SYSEX_DATA_LEN + 1 && data[SYSEX_DATA_LEN + 1] > MOMENTARY_BANK)) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+    if (data[0] != bankManager.active_bank() && !bankManager.switch_bank(data[0], false)) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+        return;
+    }
+    current_settings.active_bank = data[0];
+    for (int output = 0; output < 4; ++output) {
+        current_settings.outputs[output].type = (OutputType)data[2 + output * 3];
+        current_settings.outputs[output].channel = data[3 + output * 3];
+        current_settings.outputs[output].note = data[4 + output * 3];
+    }
+    for (int input = 0; input < 2; ++input)
+        current_settings.cv_input_role[input] = (InputRole)data[14 + input];
+    for (int knob = 0; knob < 3; ++knob)
+        current_settings.knob_role[knob] = (InputRole)data[16 + knob];
+    if (length > SYSEX_DATA_LEN + 1)
+        current_settings.momentary_role = (MomentaryRole)data[SYSEX_DATA_LEN + 1];
+    const bool persist = length == SYSEX_DATA_LEN || data[SYSEX_DATA_LEN] != 0;
+    if (persist) settings_save(&current_settings);
+    enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
+    enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);
+}
+
 static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
     if (!payload || !payload_len) return false;
 
-    memset(payload, 0, SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME);
+    memset(payload, 0, SYSEX_CONFIG_PAYLOAD_LEN);
     payload[0] = current_settings.active_bank;
     payload[1] = (uint8_t)bankManager.num_valid_banks();
     for (int i = 0; i < 4; i++) {
@@ -799,13 +840,14 @@ static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
         }
     }
 
-    *payload_len = SYSEX_DATA_LEN + (FLASH_MAX_BANKS * SYSEX_BANK_NAME);
+    payload[SYSEX_CONFIG_ROLE_OFFSET] = (uint8_t)current_settings.momentary_role;
+    *payload_len = SYSEX_CONFIG_PAYLOAD_LEN;
     return true;
 }
 
 static void send_config_sysex(uint8_t req_id) {
     if (SYSEX_DEBUG && Serial) Serial.printf("send_config_sysex() active_bank=%i req_id=%u\n", current_settings.active_bank, req_id);
-    uint8_t payload[SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME];
+    uint8_t payload[SYSEX_CONFIG_PAYLOAD_LEN];
     uint16_t payload_len = 0;
     if (!build_config_payload(payload, &payload_len)) {
         send_nack(req_id, SYSEX_NACK_NOT_READY);
@@ -942,58 +984,7 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         handle_set_sample_meta_chunk_(req_id, chunk_idx, d + SYSEX_META_CHUNK_HEADER_BYTES, raw_len, is_last);
 
     } else if (type == SYSEX_TYPE_SET_CONFIG_REQ) {
-        if (payload_len < SYSEX_DATA_LEN) {
-            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
-            return;
-        }
-
-        if (d[0] > FLASH_MAX_BANKS) {
-            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
-            return;
-        }
-
-        // Attempt the bank switch BEFORE touching current_settings.active_bank
-        // (and before any flash write below) - only commit the new value once
-        // we know it actually took effect. Otherwise a failed switch (e.g. an
-        // empty/never-configured bank slot) would leave current_settings
-        // pointing at a bank that was never actually loaded, desyncing it
-        // from bankManager.active_bank() (the bank really playing). That
-        // desync then makes a *later* request to switch back to the
-        // previously-active bank look like a no-op (same value already
-        // "set"), silently skipping the switch_bank() call that should have
-        // restored playback.
-        if ((int)d[0] != bankManager.active_bank()) {
-            if (!bankManager.switch_bank(d[0])) {
-                enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
-                return;
-            }
-        }
-
-        current_settings.active_bank = d[0];
-        // d[1] = num_valid_banks is read-only, skip
-        for (int i = 0; i < 4; i++) {
-            current_settings.outputs[i].type    = (OutputType)d[2 + i * 3];
-            current_settings.outputs[i].channel = d[2 + i * 3 + 1];
-            current_settings.outputs[i].note    = d[2 + i * 3 + 2];
-        }
-        current_settings.cv_input_role[0] = (InputRole)d[14];
-        current_settings.cv_input_role[1] = (InputRole)d[15];
-        current_settings.knob_role[0]     = (InputRole)d[16];
-        current_settings.knob_role[1]     = (InputRole)d[17];
-        current_settings.knob_role[2]     = (InputRole)d[18];
-
-        // Optional 20th payload byte: persist flag. 1 (or absent, for
-        // backwards compatibility with older web-tool builds) writes the
-        // settings to flash immediately. 0 applies them to the running
-        // device only, without a flash write - lets the web tool "try out"
-        // settings (e.g. active bank) live without wearing flash's limited
-        // rewrite lifetime; an explicit save (persist=1) is needed to make
-        // the change survive a reboot.
-        const bool persist = (payload_len < SYSEX_DATA_LEN + 1) || (d[SYSEX_DATA_LEN] != 0);
-        if (persist) settings_save(&current_settings);
-
-        enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
-        enqueue_pending_sysex(PENDING_SEND_CONFIG, req_id);
+        handle_set_config_(req_id, d, payload_len);
 
     } else if (type == SYSEX_TYPE_REBOOT_REQ) {
         enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
@@ -1006,111 +997,67 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
 // ---------------------------------------------------------------------------
 // Boot-mode / config-mode state
 // ---------------------------------------------------------------------------
-static bool config_mode      = false;
-static bool boot_check_done  = false;
-static uint32_t boot_hold_start_ms  = 0;
-static uint32_t boot_window_start_ms = 0;  // set on first loop() call
-static int config_mode_displayed_bank = -1;
+static bool control_feedback_active = false;
+static bool control_feedback_ok = true;
+static uint32_t control_feedback_at = 0;
 
-static void config_mode_update_leds(int bank) {
-    // LEDs 0..N-1 lit to show which bank is selected (0 = all off → compiled-in).
-    for (int i = 0; i < sw.numLeds; i++) {
-        if (bank > 0 && i < bank) sw.LedOn(i);
-        else                       sw.LedOff(i);
+static void handle_config_mode() {
+    if (!sw.SwitchReady()) return;
+    const uint32_t now = millis();
+    const uint16_t main = sw.KnobVal(ComputerCard::Main);
+    uint8_t valid_banks = 1;
+    for (int bank = 1; bank <= BankManager::MAX_FLASH_BANKS; ++bank) {
+        if (bankManager.is_bank_valid(bank)) valid_banks |= 1u << bank;
     }
+    ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+        device_controls.update(now, sw.SwitchVal() == ComputerCard::Down,
+            main, sw.KnobVal(ComputerCard::X), valid_banks,
+            bankManager.active_bank(), current_settings.momentary_role);
+        output_wrapper.set_muted(device_controls.muted(current_settings.momentary_role));
+        if (!device_controls.suppress_hold()) {
+            auto *euclidian = static_cast<EuclidianSequencer*>(sequencer);
+            const bool locked = sw.SwitchVal() == ComputerCard::Up;
+            if (euclidian->is_euclidian_seed_lock() != locked)
+                euclidian->set_euclidian_seed_lock(locked);
+        }
+    }
+    if (!device_controls.request_pending()) return;
+
+    const uint8_t bank = device_controls.candidate_bank();
+    const bool changed = bank != bankManager.active_bank();
+    const bool setup = device_controls.setup_request();
+    const bool ok = bankManager.switch_bank(bank, false);
+    if (ok) {
+        current_settings.active_bank = bank;
+        if (setup) current_settings.momentary_role = device_controls.candidate_role();
+        if (setup || changed) settings_save(&current_settings);
+        enqueue_pending_sysex(PENDING_SEND_CONFIG, 0);
+    }
+    ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+        device_controls.complete(ok, main);
+    }
+    control_feedback_active = true;
+    control_feedback_ok = ok;
+    control_feedback_at = millis();
 }
 
-// Called from loop() — handles all config-mode logic.
-// Returns true if we are in config mode (caller should skip normal processing).
-static uint32_t cfg_debug_last_ms = 0;  // rate-limit the boot-mode debug prints
-
-static bool handle_config_mode() {
-    if (!boot_check_done) {
-        uint32_t now = millis();
-
-        // Record the timestamp of the first loop() call.  By this point setup()
-        // has completed and core1 has been running audio interrupts for the
-        // full duration of setup(), so the switch hardware is definitely live.
-        // We use elapsed time relative to this point so a slow setup() (e.g.
-        // TinyUSB enumeration, flash reads) doesn't shrink or eliminate the
-        // config-mode detection window.
-        if (boot_window_start_ms == 0) {
-            boot_window_start_ms = now;
-            if (Serial) Serial.printf(
-                "ConfigMode: window opened at %ums; hold Down for 1.5s within 8s\n", now);
+static void update_device_control_leds() {
+    const uint32_t now = millis();
+    const uint32_t elapsed = now - control_feedback_at;
+    if (control_feedback_active && elapsed >= (control_feedback_ok ? 180u : 800u))
+        control_feedback_active = false;
+    const bool owned = device_controls.owns_main() || control_feedback_active;
+    if (!owned && !output_wrapper.control_leds_owned) return;
+    output_wrapper.control_leds_owned = owned;
+    for (int led = 0; led < sw.numLeds; ++led) {
+        bool on = false;
+        if (owned && control_feedback_active) {
+            on = control_feedback_ok || (elapsed / 100) % 2 == 0;
+        } else if (owned) {
+            on = led == device_controls.candidate_bank()
+                || (led == 5 && device_controls.candidate_role() == MOMENTARY_BANK);
+            if (device_controls.mode() == DeviceControls::BootRelease) on &= (now / 180) % 2 == 0;
         }
-        uint32_t elapsed = now - boot_window_start_ms;
-
-        // Periodic status print every ~500 ms while window is open
-        if (Serial && (now - cfg_debug_last_ms >= 500)) {
-            cfg_debug_last_ms = now;
-            const char *sw_name[] = {"Down", "Middle", "Up"};
-            int sv = (int)sw.SwitchVal();
-            if (sv < 0 || sv > 2) sv = 2;
-            Serial.printf("ConfigMode: elapsed=%ums switch=%s hold_for=%ums\n",
-                elapsed, sw_name[sv],
-                (boot_hold_start_ms && sv == 0) ? (now - boot_hold_start_ms) : 0u);
-        }
-
-        // Detection window: 8 seconds from first loop() call.
-        // User must hold the switch Down for 1.5 s within this window.
-        if (elapsed < 8000) {
-            if (sw.SwitchVal() == ComputerCard::Down) {
-                if (boot_hold_start_ms == 0) boot_hold_start_ms = now;
-                if (now - boot_hold_start_ms >= 1500) {
-                    // Switch held Down for 1.5 s → enter config mode
-                    if (Serial) Serial.println("ConfigMode: ENTERED config mode");
-                    config_mode = true;
-                    boot_check_done = true;
-                    // Flash all LEDs three times to signal entry
-                    for (int flash = 0; flash < 3; flash++) {
-                        for (int i = 0; i < sw.numLeds; i++) sw.LedOn(i);
-                        delay(150);
-                        for (int i = 0; i < sw.numLeds; i++) sw.LedOff(i);
-                        delay(150);
-                    }
-                    config_mode_displayed_bank = bankManager.active_bank();
-                    config_mode_update_leds(config_mode_displayed_bank);
-                }
-            } else {
-                boot_hold_start_ms = 0;
-            }
-        } else {
-            if (Serial) Serial.printf("ConfigMode: window closed at elapsed=%ums - boot-mode unavailable\n", elapsed);
-            boot_check_done = true; // window expired, never entering config mode
-        }
+        sw.LedOn(led, on);
     }
-
-    if (!config_mode) return false;
-
-    // --- Config mode active ---
-    // Main knob selects bank; switch Middle confirms and exits.
-    int num_banks = bankManager.num_valid_banks();
-    if (num_banks < 1) num_banks = 1;
-    int32_t knob = sw.KnobVal(ComputerCard::Main);
-    int desired = (int)((knob * num_banks) / 4096);
-    if (desired >= num_banks) desired = num_banks - 1;
-
-    if (desired != config_mode_displayed_bank) {
-        config_mode_displayed_bank = desired;
-        config_mode_update_leds(desired);
-    }
-
-    // Switch to Middle position → confirm selection
-    if (sw.SwitchVal() == ComputerCard::Middle && sw.SwitchChanged()) {
-        bankManager.switch_bank(desired);
-        current_settings.active_bank = (uint8_t)desired;
-        settings_save(&current_settings);
-        config_mode = false;
-        // Brief confirmation flash
-        for (int i = 0; i < sw.numLeds; i++) sw.LedOn(i);
-        delay(300);
-        for (int i = 0; i < sw.numLeds; i++) sw.LedOff(i);
-    }
-
-    // Keep audio calculated even in config mode.
-    if (sw.calculate_mode == IN_MAIN_LOOP)
-        sw.CalculateSamples();
-
-    return true; // skip normal loop body
 }

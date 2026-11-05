@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Compulidian Manager</title>
 <script src="https://cdn.jsdelivr.net/npm/webmidi@3.1.12/dist/iife/webmidi.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <style>
   :root {
     --bg:      #18181b;
@@ -20,15 +21,15 @@
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
   h1 { padding: 1rem 1.5rem; font-size: 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: .75rem; }
   h1 span.badge { font-size: .7rem; background: var(--accent); color: #000; padding: 2px 8px; border-radius: 99px; }
-  nav { display: flex; border-bottom: 1px solid var(--border); }
+  nav { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
   nav button { padding: .6rem 1.25rem; background: none; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; border-bottom: 2px solid transparent; transition: .15s; }
   nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
   nav button:hover { color: var(--text); }
-  .tab { display: none; padding: 1.25rem 1.5rem; max-width: 900px; }
+  .tab { display: none; padding: 1.25rem 1.5rem; max-width: 1100px; }
   .tab.active { display: block; }
   label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
   select, input[type=number], input[type=text] { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .4rem .6rem; border-radius: 6px; font-size: .9rem; }
-  button.btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .45rem 1rem; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: .15s; }
+  button.btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .45rem .75rem; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: .15s; min-height: 34px; }
   button.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   button.btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
   button.btn.primary:hover:not(:disabled) { opacity: .85; }
@@ -58,8 +59,35 @@
   .midi-status.on { background: var(--ok); }
   #server-warning { background: #78350f; border: 1px solid #b45309; border-radius: 8px; padding: .75rem 1rem; margin: .75rem 1.5rem; font-size: .85rem; display: none; }
   #server-warning strong { color: var(--accent); }
-
-  .playing-slot { background: rgba(255,255,255,1) !important; }
+  svg.lucide { width: 16px; height: 16px; flex-shrink: 0; }
+  fieldset { border: 0; min-width: 0; }
+  .toolbar { display: flex; align-items: flex-end; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .toolbar .spacer { flex: 1; }
+  .table-scroll { overflow-x: auto; margin-bottom: 1rem; }
+  .table-scroll table { margin-bottom: 0; }
+  #slot-table { min-width: 620px; table-layout: fixed; }
+  #slot-table th:nth-child(1) { width: 34px; }
+  #slot-table th:nth-child(2) { width: 130px; }
+  #slot-table th:nth-child(3) { width: 120px; }
+  #slot-table th:nth-child(5) { width: 100px; }
+  #slot-table th:nth-child(6) { width: 56px; }
+  #slot-table input[type=number] { width: 72px !important; padding: .3rem .4rem; }
+  #slot-table select { width: 100%; min-width: 0; }
+  .state-line { font-size: .8rem; color: var(--muted); min-height: 1.3em; margin-bottom: .5rem; }
+  details.advanced { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+  details.advanced summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: .75rem; }
+  dialog { margin: auto; width: min(420px, calc(100% - 2rem)); padding: 1.25rem; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  dialog::backdrop { background: #0009; }
+  dialog h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+  dialog .row:last-child { justify-content: flex-end; margin-bottom: 0; }
+  .playing-slot { background: #365a45 !important; }
+  @media (max-width: 600px) {
+    h1 { padding: .8rem 1rem; flex-wrap: wrap; }
+    .tab { padding: 1rem; }
+    nav button { flex: 1; padding: .65rem .5rem; }
+    .toolbar .spacer { display: none; }
+    #connection-bar { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
@@ -76,15 +104,15 @@
 
 <div id="connection-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border)">
   <button class="btn primary" onclick="midiConnect()">
-    <span class="midi-status" id="midi-dot"></span> Connect via Web MIDI
+    <span class="midi-status" id="midi-dot"></span> Connect
   </button>
   <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
 </div>
 
 <div id="action-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
   <div class="col">
-    <label>Active bank <span style="text-transform:none;font-weight:400">(plays now)</span></label>
-    <select id="cfg-active-bank" onchange="applyConfigLive()">
+    <label for="cfg-active-bank">Playing bank</label>
+    <select id="cfg-active-bank" disabled onchange="applyConfigLive()">
       <option value="0">0 — Compiled-in (808)</option>
       <option value="1">1 — Flash bank 1</option>
       <option value="2">2 — Flash bank 2</option>
@@ -93,33 +121,19 @@
     </select>
   </div>
   <span id="cfg-banks-available" style="font-size:.8rem;color:var(--muted)"></span>
-  <!--<div style="flex:1 1 auto"></div>-->
-  <button class="btn primary" onclick="saveConfig()" title="Write current settings to flash so they survive a reboot">💾 Save to Device</button>
-  <button class="btn" onclick="readConfig()">↺ Read Config</button>
-  <button class="btn danger" onclick="rebootToBootloader()">⏻ Reboot to Flash Mode</button>
+  <button class="btn" id="refresh-device-btn" onclick="midiConnect()" title="Refresh device" aria-label="Refresh device"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
 </div>
 
 <div id="status-bar" style="padding:.5rem 1.5rem;border-bottom:1px solid var(--border)">
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-  <div id="status"></div>
+  <div id="status" role="status" aria-live="polite"></div>
 </div>
 
-<details id="midi-log-panel" style="margin:0 1.5rem;border-bottom:1px solid var(--border)">
-  <summary style="cursor:pointer;padding:.5rem 0;font-size:.8rem;color:var(--muted)">MIDI Debug Log</summary>
-  <div style="padding-bottom:.75rem">
-    <div class="row" style="margin-bottom:.5rem">
-      <button class="btn" onclick="clearMidiLog()">Clear MIDI Log</button>
-      <span id="midi-runtime-tag" style="font-size:.75rem;color:var(--muted)"></span>
-    </div>
-    <pre id="midi-debug-log" style="max-height:180px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.5rem;font-size:.72rem;color:var(--muted);white-space:pre-wrap"></pre>
-  </div>
-</details>
-
 <nav>
-  <button class="active" onclick="switchTab('bank', this)">Bank Management</button>
-  <button onclick="switchTab('samples', this)">Sample Store</button>
-  <button onclick="switchTab('io', this)">Output/Input Mapping</button>
-  <button onclick="switchTab('other', this)">Other Settings</button>
+  <button class="active" onclick="switchTab('bank', this)">Banks</button>
+  <button onclick="switchTab('samples', this)">Samples</button>
+  <button onclick="switchTab('other', this)">Settings</button>
+  <button onclick="switchTab('io', this)">Device</button>
 </nav>
 
 <!-- =====================================================================
@@ -128,148 +142,126 @@
 <div id="tab-bank" class="tab active">
 
   <p id="slots-gate" style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">
-    Connect via Web MIDI above to load this device's sample slots — slot names and
-    MIDI notes come from the device's active output configuration, not from this tool.
+    Not connected.
   </p>
 
   <div id="bank-editor" style="display:none">
-
-    <div class="row">
+    <fieldset id="bank-form" disabled>
+    <div class="toolbar">
       <div class="col">
-        <label>Editing bank slot</label>
+        <label for="bank-slot">Edit bank</label>
         <select id="bank-slot" onchange="onBankSlotChanged()"></select>
       </div>
       <div class="col">
-        <button class="btn" id="pull-from-device-btn" onclick="readFromDevice();">⬆ Read Bank from Device</button>
+        <label for="bank-name">Name</label>
+        <input type="text" id="bank-name" value="" maxlength="23" style="width:160px" oninput="markBankDirty()">
       </div>
-      <div class="col">
-        <button class="btn" id="refresh-samples-btn" onclick="refreshSampleList();">↻ Refresh Sample List</button>
-      </div>
-      <div class="col">
-        <label>Bank name</label>
-        <input type="text" id="bank-name" value="My Kit" maxlength="23" style="width:140px" onchange="markBankDirty()">
-      </div>
+      <span class="spacer"></span>
+      <button class="btn" id="play-bank-btn" onclick="playEditedBank()"><i data-lucide="play" aria-hidden="true"></i> Play bank</button>
+      <button class="btn" id="copy-bank-btn" onclick="openCopyBankDialog()"><i data-lucide="copy" aria-hidden="true"></i> Copy to...</button>
+      <button class="btn" id="pull-from-device-btn" onclick="readFromDevice()"><i data-lucide="undo-2" aria-hidden="true"></i> Discard</button>
+      <button class="btn primary" id="save-bank-btn" onclick="writeBankToDevice()"><i data-lucide="save" aria-hidden="true"></i> Save bank</button>
     </div>
 
-    <div id="bank-active-indicator" style="font-size:.8rem;color:var(--muted);margin-bottom:.4rem"></div>
-    <div id="bank-state-banner" style="font-size:.8rem;margin-bottom:.75rem;min-height:1.2em"></div>
+    <div id="bank-active-indicator" class="state-line"></div>
+    <div id="bank-state-banner" class="state-line" aria-live="polite"></div>
     <p id="samples-empty-hint" style="display:none;font-size:.8rem;color:var(--muted);margin-bottom:.75rem">
-      No samples found in the device's sample store yet. Samples must be uploaded to the device
-      separately (see the project README) before they can be assigned to a voice here.
+      No installed samples. Built-in samples are available.
     </p>
-    <p style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">
-      Each slot's picker offers both sample-store entries and the device's built-in "Compiled"
-      samples directly. "— none / unassigned —" always stays silent. If a slot references a
-      sample-store entry that later goes missing (e.g. deleted), the device automatically falls
-      back to that voice's own compiled-in sample instead of going silent — no setting needed.
-    </p>
-
     <div class="row" style="margin-bottom:.5rem;align-items:flex-end">
       <div class="col">
-        <label>Filter picker by type</label>
+        <label>Sample type</label>
         <select id="bank-filter-type" onchange="onBankFilterChanged()"></select>
       </div>
       <div class="col">
-        <label>Filter picker by tag</label>
+        <label>Tag</label>
         <input type="text" id="bank-filter-tag" placeholder="e.g. acoustic" style="width:140px" onchange="onBankFilterChanged()">
       </div>
       <div class="col">
         <label style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
-          <input type="checkbox" id="bank-filter-show-all" checked onchange="onBankFilterChanged()"> Show all (ignore filter)
+          <input type="checkbox" id="bank-filter-show-all" checked onchange="onBankFilterChanged()"> Show all
         </label>
       </div>
     </div>
 
-    <table id="slot-table">
+    <div class="table-scroll"><table id="slot-table">
       <thead><tr>
         <th>#</th>
         <th>Slot</th>
-        <th>Note (device)</th>
+        <th>Note</th>
         <th>Sample</th>
         <th>Volume</th>
         <th></th>
       </tr></thead>
       <tbody id="slot-list"></tbody>
-    </table>
-
-    <div class="row">
-      <button class="btn primary" onclick="writeBankToDevice()">💾 Save Bank to Device</button>
-    </div>
-    <p style="font-size:.8rem;color:var(--muted);margin:-.5rem 0 1rem">
-      Applies immediately and is written to flash — no reboot needed. Only assigns samples
-      already present in the device's sample store; it does not upload any audio data itself.
-    </p>
-
+    </table></div>
+    </fieldset>
   </div><!-- /bank-editor -->
 
 </div><!-- /tab-bank -->
+
+<dialog id="copy-bank-dialog" aria-labelledby="copy-bank-title">
+  <h2 id="copy-bank-title">Copy bank</h2>
+  <p id="copy-bank-source" class="state-line"></p>
+  <div class="row"><div class="col">
+    <label for="copy-bank-target">Destination</label>
+    <select id="copy-bank-target"></select>
+  </div></div>
+  <div class="row">
+    <button class="btn" onclick="document.getElementById('copy-bank-dialog').close()">Cancel</button>
+    <button class="btn primary" id="confirm-copy-btn" onclick="copyBankToDevice()"><i data-lucide="copy" aria-hidden="true"></i> Copy bank</button>
+  </div>
+</dialog>
 
 <!-- =====================================================================
      TAB: SAMPLE STORE
      ===================================================================== -->
 <div id="tab-samples" class="tab">
 
-  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">
-    Samples live in the device's shared content-addressed sample store, independent of any
-    bank. Add WAV files here, preview them in-browser, then build a "sample store update" UF2
-    to flash — this only ever <em>appends</em> new samples (existing ones on the device are
-    left untouched), so it's safe to build and flash several of these over time.
-  </p>
-
-  <div class="section-title">On-device samples</div>
+  <div class="section-title">Installed samples</div>
+  <fieldset id="sample-tags-form" disabled>
   <div class="row" style="margin-bottom:.5rem">
-    <button class="btn" onclick="refreshSampleList()">↻ Refresh</button>
-    <button class="btn" onclick="writeSampleMetaToDevice()" title="Save the Type/Tags edits below to the device">💾 Save Metadata to Device</button>
+    <button class="btn" onclick="refreshSampleList()" title="Refresh samples" aria-label="Refresh samples"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+    <button class="btn" id="save-tags-btn" disabled onclick="writeSampleMetaToDevice()"><i data-lucide="save" aria-hidden="true"></i> Save tags</button>
+    <span id="sample-tags-state" class="state-line" aria-live="polite"></span>
     <span id="device-samples-summary" style="font-size:.8rem;color:var(--muted)"></span>
   </div>
-  <table id="device-samples-table">
+  <div class="table-scroll"><table id="device-samples-table">
     <thead><tr>
       <th>Name</th><th>Hash</th><th>Rate</th><th>Duration</th><th>Size</th><th>Type</th><th>Tags</th><th></th>
     </tr></thead>
     <tbody id="device-samples-list"></tbody>
-  </table>
+  </table></div>
+  </fieldset>
 
-  <div class="section-title">New samples to upload</div>
+  <div class="section-title">Staged samples</div>
   <input type="file" id="sample-file-input" accept=".wav,audio/wav" multiple style="display:none" onchange="handleSampleFileInput(event)">
   <div id="sample-dropzone" ondragover="event.preventDefault(); this.classList.add('over')"
        ondragleave="this.classList.remove('over')"
        ondrop="handleSampleDrop(event)"
        onclick="document.getElementById('sample-file-input').click()"
        style="border:2px dashed var(--border); border-radius:8px; padding:1.5rem; text-align:center; color:var(--muted); cursor:pointer; margin-bottom:1rem">
-    Drop WAV files here, or click to choose files.
+    Add WAV files
   </div>
-  <table id="staged-samples-table">
+  <div class="table-scroll"><table id="staged-samples-table">
     <thead><tr>
       <th>Name</th><th>Rate</th><th>Duration</th><th>Size</th><th>Status</th><th></th>
     </tr></thead>
     <tbody id="staged-samples-list"></tbody>
-  </table>
+  </table></div>
 
   <div class="row">
-    <button class="btn primary" onclick="buildAndDownloadIncrementalUf2()">⬇ Build Update UF2</button>
-    <button class="btn" onclick="exportSampleLibrary()">💾 Export Library (backup/share)</button>
-    <button class="btn" onclick="document.getElementById('library-file-input').click()">📂 Import Library</button>
+    <button class="btn primary" onclick="buildAndDownloadIncrementalUf2()"><i data-lucide="download" aria-hidden="true"></i> Download update (.uf2)</button>
+    <button class="btn" onclick="exportSampleLibrary()"><i data-lucide="download" aria-hidden="true"></i> Export staged samples</button>
+    <button class="btn" onclick="document.getElementById('library-file-input').click()"><i data-lucide="folder-open" aria-hidden="true"></i> Import library</button>
     <input type="file" id="library-file-input" accept=".samplib.json,application/json" style="display:none" onchange="handleLibraryFileInput(event)">
   </div>
-  <p style="font-size:.8rem;color:var(--muted);margin:.5rem 0 1rem">
-    "Build Update UF2" re-reads the device's current sample list, then downloads a UF2 containing
-    just the new samples plus an updated index (minus anything marked for deletion above) — flash
-    it via BOOTSEL drag-and-drop or picotool, same as any other UF2. Samples aren't resampled; the
-    device honours each sample's original rate. "Export Library" saves everything staged here (not
-    yet flashed) to a single file you can re-import later or share with someone else so they get
-    the same samples.
-  </p>
-
-  <div class="section-title">Rebuild from library (reclaim flash space)</div>
-  <p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem">
-    Deleting samples above only removes them from the index — their audio bytes stay in flash
-    until a full rebuild. This discards the device's <em>entire</em> current sample store and
-    replaces it with only what's staged below (import a previously-exported library first if
-    needed), reclaiming all deleted/orphaned space.
-  </p>
+  <details class="advanced"><summary>Reclaim sample storage</summary>
+  <p class="state-line">Replaces all installed samples with the staged library.</p>
   <div class="row">
-    <button class="btn danger" onclick="rebuildStoreFromLibrary()">⚠ Rebuild Store from Library</button>
+    <button class="btn danger" onclick="rebuildStoreFromLibrary()"><i data-lucide="triangle-alert" aria-hidden="true"></i> Rebuild storage (.uf2)</button>
   </div>
+  </details>
 
 </div><!-- /tab-samples -->
 
@@ -277,8 +269,18 @@
      TAB: OUTPUT/INPUT MAPPING
      ===================================================================== -->
 <div id="tab-io" class="tab">
-
-  <div class="section-title">Jack Configuration</div>
+  <div class="section-title">Fixed routing</div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Source</th><th>Destination</th></tr></thead>
+    <tbody>
+      <tr><td>Main + CV 1</td><td>Density group 1</td></tr>
+      <tr><td>X + CV 2</td><td>Density group 2</td></tr>
+      <tr><td>Y</td><td>Internal tempo</td></tr>
+      <tr><td>Audio In 1</td><td>Shuffle</td></tr>
+      <tr><td>Audio In 2</td><td>Sample pitch</td></tr>
+    </tbody>
+  </table></div>
+  <div hidden>
   <div class="grid4" id="cfg-outputs">
     <!-- filled by renderOutputs() -->
   </div>
@@ -292,6 +294,18 @@
   <div class="grid4" id="cfg-knobs" style="grid-template-columns:repeat(3,1fr)">
     <!-- filled by renderKnobs() -->
   </div>
+  </div>
+  <details class="advanced"><summary>Maintenance</summary>
+    <button class="btn danger" onclick="rebootToBootloader()"><i data-lucide="power" aria-hidden="true"></i> Enter flash mode</button>
+  </details>
+  <details id="midi-log-panel" class="advanced">
+    <summary>MIDI diagnostics</summary>
+    <div class="row">
+      <button class="btn" onclick="clearMidiLog()">Clear log</button>
+      <span id="midi-runtime-tag" class="state-line"></span>
+    </div>
+    <pre id="midi-debug-log" style="max-height:180px;overflow:auto;font-size:.72rem;white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+  </details>
 
 </div><!-- /tab-io -->
 
@@ -299,9 +313,21 @@
      TAB: OTHER SETTINGS
      ===================================================================== -->
 <div id="tab-other" class="tab">
-
-  <p style="color:var(--muted);font-size:.8rem;margin-top:1.25rem">More device settings will appear here in future updates.</p>
-
+  <div class="toolbar">
+    <span id="settings-save-state" class="state-line">Not connected</span>
+    <span class="spacer"></span>
+    <button class="btn primary" id="save-settings-btn" disabled onclick="saveConfig().catch(console.warn)"><i data-lucide="save" aria-hidden="true"></i> Save settings</button>
+  </div>
+  <div class="section-title">Performance</div>
+  <div class="row">
+    <div class="col">
+      <label for="cfg-momentary-role">Momentary switch</label>
+      <select id="cfg-momentary-role" disabled onchange="applyConfigLive()">
+        <option value="0">Mute while held</option>
+        <option value="1">Select bank</option>
+      </select>
+    </div>
+  </div>
 </div><!-- /tab-other -->
 
 <script type="module" src="compulidian_manager.js"></script>

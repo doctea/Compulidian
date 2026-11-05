@@ -34,15 +34,52 @@ public:
     volatile int calculate_mode = CALCULATE_SAMPLES_MODE; // default to processing in interrupt on second core
     volatile bool enable_volume = true; // default to volume enabled
 
+    volatile uint32_t audio_callback_count = 0;
+    volatile uint32_t audio_buffer_count = 0;
+
     volatile int global_pitch = 2048; // default to normal pitch
 
     static const int BUFFER_SIZE = 128;
+    static const uint16_t BANK_TRANSITION_FADE_SAMPLES = 128;
+    static const uint32_t OUTPUT_GAIN_ONE_Q15 = 1u << 15;
     volatile int_fast32_t buffer[2][BUFFER_SIZE];
     volatile uint_fast8_t bufferIndex = 0;
 
     volatile bool bufferReady[2] = {true, true}; // set to true when the buffer is ready to be written
     volatile int read_buffer_id = 0;
     volatile int write_buffer_id = 0;
+    enum BankTransitionState : uint8_t {
+        BANK_TRANSITION_IDLE,
+        BANK_TRANSITION_FADING_OUT,
+        BANK_TRANSITION_MUTED,
+        BANK_TRANSITION_WAITING_FOR_BUFFER,
+        BANK_TRANSITION_BUFFER_READY,
+        BANK_TRANSITION_FADING_IN,
+    };
+    volatile BankTransitionState bank_transition_state = BANK_TRANSITION_IDLE;
+    volatile uint16_t bank_transition_remaining = 0;
+    volatile uint8_t bank_transition_buffer_id = 0;
+    volatile uint32_t output_gain_q15 = OUTPUT_GAIN_ONE_Q15;
+    volatile uint32_t bank_transition_start_gain_q15 = OUTPUT_GAIN_ONE_Q15;
+
+    void begin_bank_transition() {
+        bank_transition_start_gain_q15 = output_gain_q15;
+        if (bank_transition_start_gain_q15 == 0) {
+            bank_transition_remaining = 0;
+            bank_transition_state = BANK_TRANSITION_MUTED;
+            return;
+        }
+        bank_transition_remaining = BANK_TRANSITION_FADE_SAMPLES;
+        bank_transition_state = BANK_TRANSITION_FADING_OUT;
+    }
+
+    bool bank_transition_is_silent() const {
+        return bank_transition_state == BANK_TRANSITION_MUTED;
+    }
+
+    void finish_bank_transition() {
+        bank_transition_state = BANK_TRANSITION_WAITING_FOR_BUFFER;
+    }
 
     void __not_in_flash_func(CalculateSamples)() override {
         //return;
@@ -96,7 +133,12 @@ public:
                 buffer[write_buffer_id][i] = samplesum16;
             }
             bufferReady[write_buffer_id] = true;
+            if (bank_transition_state == BANK_TRANSITION_WAITING_FOR_BUFFER) {
+                bank_transition_buffer_id = write_buffer_id;
+                bank_transition_state = BANK_TRANSITION_BUFFER_READY;
+            }
             write_buffer_id = (write_buffer_id + 1) % 2;
+            ++audio_buffer_count;
         }
     }
 
@@ -107,7 +149,41 @@ public:
 
     virtual void __not_in_flash_func(ProcessSample)()
 	{       
-		AudioOut1(buffer[read_buffer_id][bufferIndex]);
+        ++audio_callback_count;
+
+        if (bank_transition_state == BANK_TRANSITION_BUFFER_READY
+            && bufferIndex == 0
+            && read_buffer_id == bank_transition_buffer_id) {
+            bank_transition_remaining = BANK_TRANSITION_FADE_SAMPLES;
+            bank_transition_state = BANK_TRANSITION_FADING_IN;
+        }
+
+        if (bank_transition_state == BANK_TRANSITION_FADING_OUT) {
+            if (bank_transition_remaining > 0) {
+                --bank_transition_remaining;
+                output_gain_q15 = bank_transition_start_gain_q15 * bank_transition_remaining
+                    / BANK_TRANSITION_FADE_SAMPLES;
+            }
+            if (bank_transition_remaining == 0) {
+                output_gain_q15 = 0;
+                bank_transition_state = BANK_TRANSITION_MUTED;
+            }
+        } else if (bank_transition_state == BANK_TRANSITION_FADING_IN) {
+            if (bank_transition_remaining > 0) {
+                const uint16_t progressed = BANK_TRANSITION_FADE_SAMPLES
+                    - bank_transition_remaining + 1;
+                output_gain_q15 = OUTPUT_GAIN_ONE_Q15 * progressed
+                    / BANK_TRANSITION_FADE_SAMPLES;
+                --bank_transition_remaining;
+            }
+            if (bank_transition_remaining == 0) {
+                output_gain_q15 = OUTPUT_GAIN_ONE_Q15;
+                bank_transition_state = BANK_TRANSITION_IDLE;
+            }
+        }
+
+        const int32_t mixed_sample = buffer[read_buffer_id][bufferIndex];
+		AudioOut1((mixed_sample * (int32_t)output_gain_q15) >> 15);
 		// AudioOut2(buffer[read_buffer_id][bufferIndex]);
 
         bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;

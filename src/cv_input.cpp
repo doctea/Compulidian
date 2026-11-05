@@ -58,6 +58,19 @@ void setup_cv_input() {
 }
 
 #include "audio/audio.h"
+#include "device_controls.h"
+
+class ControlKnobVoltageSource : public ComputerCardVoltageSource {
+public:
+    ControlKnobVoltageSource(int slot, ComputerCard *card, byte channel)
+        : ComputerCardVoltageSource(slot, card, channel, 5.0, false) {}
+
+    float adcread_to_voltage(int16_t reading) override {
+        const uint16_t filtered = channel == 0 ? device_controls.filter_main(reading)
+            : device_controls.filter_x(reading);
+        return ComputerCardVoltageSource::adcread_to_voltage(filtered);
+    }
+};
 
 // initialise the input voltage ParameterInputs that can be mapped to Parameters
 FLASHMEM 
@@ -67,11 +80,11 @@ void setup_parameter_inputs() {
     //Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
     tft_print("..setup_parameter_inputs...");
 
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(0, &sw, 0, 5.0, false));    // main knob
+    parameter_manager->addVoltageSource(new ControlKnobVoltageSource(0, &sw, 0));    // main knob
     //parameter_manager->voltage_sources->tail()->debug = true;
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(1, &sw, 4, 5.0, false));    // cv1
     //parameter_manager->voltage_sources->tail()->debug = true;
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(2, &sw, 1, 5.0, false));    // knob x
+    parameter_manager->addVoltageSource(new ControlKnobVoltageSource(2, &sw, 1));    // knob x
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(3, &sw, 5, 5.0, false));    // cv2
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(4, &sw, 2, 5.0, false));    // knob y
     //parameter_manager->voltage_sources->tail()->debug = true;
@@ -103,14 +116,7 @@ void setup_parameter_inputs() {
         true,
         //-0.4, // under 0.4, switch is HELD
         0.0003,
-        [=](bool state) -> void { 
-            if (Serial) Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
-            if (!state) {
-                if (Serial) Serial.printf("Hold switch going OFF - seed was %u\n", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
-            }
-            ((EuclidianSequencer*)sequencer)->set_euclidian_seed_lock(state);
-            if (Serial) Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", ((EuclidianSequencer*)sequencer)->is_euclidian_seed_lock() ? "ON" : "OFF", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
-        }
+        [](bool) {}
     ); 
     //vpi_hold_switch->debug = true;
     ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput(
@@ -120,10 +126,7 @@ void setup_parameter_inputs() {
         true, 
         //0.7, // over 0.7, switch is MOMENTARY
         -0.00005,
-        [=](bool state) -> void { 
-            //if (Serial) Serial.printf("Momentary switch %s\n", state ? "ON" : "OFF");
-            output_wrapper.set_muted(state);
-        }
+        [](bool) {}
     ); 
     //vpi_mome_switch->debug = true;
     
@@ -170,7 +173,7 @@ void setup_parameter_inputs() {
             Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
         } else {
             // shuffle_amount_parameter->updateValueFromNormal(0.2f);
-            // sequencer->set_shuffle_enabled(true);
+            sequencer->set_shuffle_enabled(true);
             shuffle_amount_parameter->updateValueFromNormal(0.5f);
             shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
         }

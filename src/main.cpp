@@ -49,6 +49,7 @@
 int debug_step_offset = 0;
 
 WorkshopOutputWrapper output_wrapper(&sw);
+DeviceControls device_controls;
 
 #ifdef USE_TINYUSB
   USBMIDITxQueue usb_midi_tx_queue;
@@ -58,6 +59,32 @@ volatile std::atomic<bool> started = false;
 volatile std::atomic<bool> ticked = false;
 
 void do_tick(uint32_t ticks);
+
+static bool playback_started = false;
+
+static void start_playback_when_ready() {
+  if (playback_started || !sw.SwitchReady()
+      || device_controls.mode() == DeviceControls::BootCheck) return;
+  ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+    #ifdef ENABLE_PARAMETERS
+      for (unsigned int i = 0; i < parameter_manager->voltage_sources->size(); ++i) {
+        parameter_manager->voltage_sources->get(i)->update();
+      }
+      parameter_manager->update_inputs();
+      parameter_manager->update_mixers();
+      parameter_manager->process_pending();
+    #endif
+    #ifdef ENABLE_EUCLIDIAN
+      for (unsigned int i = 0; i < sequencer->get_number_patterns(); ++i) {
+        static_cast<EuclidianPattern*>(sequencer->get_pattern(i))->make_euclid();
+      }
+    #endif
+    playback_started = true;
+    #ifdef USE_UCLOCK
+      clock_start();
+    #endif
+  }
+}
 
 static bool output_processing_pending = false;
 
@@ -97,7 +124,7 @@ void global_on_restart() {
 #ifdef ENABLE_PARAMETERS
   repeating_timer_t parameter_timer;
   bool parameter_repeating_callback(repeating_timer_t *rt) {
-    if (started) {
+    if (started && sw.SwitchReady()) {
       parameter_manager->throttled_update_cv_input__all(5, false, false);
     }
     return true;
@@ -230,11 +257,6 @@ void setup() {
   //   set_check_cv_clock_ticked_callback(check_cv_clock_ticked);
   // #endif
 
-  #ifdef USE_UCLOCK
-    //if (Serial) Serial.println("Starting uClock...");
-    clock_start();
-    //if (Serial) Serial.println("Started uClock!");
-  #endif
   started = true;
 
   if (Serial) { Serial.println(F("setup() done - starting!")); }
@@ -320,7 +342,8 @@ void __not_in_flash_func(loop)() {
     process_pending_sysex_responses();
   #endif
 
-  // if (handle_config_mode()) return;
+  handle_config_mode();
+  start_playback_when_ready();
 
   // todo: will need this if/when we convert the WorkshopOutputWrapper to use the ring buffer that Microlidian now uses
   //output_wrapper->drain();
@@ -402,6 +425,7 @@ void __not_in_flash_func(loop)() {
     sw.CalculateSamples();
     last_sample_at_us = micros();
   }
+  update_device_control_leds();
   
 
 }

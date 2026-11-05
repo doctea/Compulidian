@@ -80,21 +80,18 @@ int BankManager::get_bank_slot_count(int slot) const {
     return bank_slot_counts_[slot];
 }
 
-bool BankManager::switch_bank(int n) {
+bool BankManager::switch_bank(int n, bool persist) {
     if (n < 0 || n > MAX_FLASH_BANKS) return false;
     if (!bank_valid_[n]) return false;
     if (n == active_bank_) return true; // already active
 
-    // Silence all voices first so the audio ISR stops touching sample_data.
-    silence_all_voices_();
-
-    // Give the audio worker time to finish any in-progress buffer fill.
-    // At 48 kHz with a 128-sample buffer each fill takes ~2.7 ms.
-    // @@TODO: Use a semaphore or flag to wait for the audio ISR to finish instead of a fixed delay.
-    delay(6);
+    sw.begin_bank_transition();
+    while (!sw.bank_transition_is_silent()) delayMicroseconds(50);
 
     bool ok;
     if (n == 0) {
+        silence_all_voices_();
+        delay(6);
         restore_compiled_bank_();
         ok = true;
     } else {
@@ -106,11 +103,14 @@ bool BankManager::switch_bank(int n) {
         if (Serial) Serial.printf("BankMgr: switched to bank %d\n", n);
 
         // Persist new bank choice to flash.
-        Settings s = settings_load();
-        s.active_bank = (uint8_t)n;
-        settings_save(&s);
+        if (persist) {
+            Settings s = settings_load();
+            s.active_bank = (uint8_t)n;
+            settings_save(&s);
+        }
     }
 
+    sw.finish_bank_transition();
     return ok;
 }
 
@@ -207,10 +207,32 @@ bool BankManager::load_bank_config_(int slot) {
         return false;
     }
 
-    release_flash_pool_();
-
     uint32_t voices_to_load = (uint32_t)NUM_VOICES;
     if (voices_to_load > (uint32_t)BANK_CONFIG_MAX_SLOTS) voices_to_load = BANK_CONFIG_MAX_SLOTS;
+
+    bool has_playable_sample = false;
+    for (uint32_t i = 0; i < voices_to_load && !has_playable_sample; ++i) {
+        const SlotConfig &slotcfg = bank_config_.slots[i];
+        if (slotcfg.sample_id == 0) continue;
+        if (slotcfg.flags & BANK_CONFIG_SLOT_FLAG_COMPILED_INDEX) {
+            const uint32_t compiled_index = slotcfg.sample_id - 1;
+            has_playable_sample = compiled_index < compiled_num_voices_ && compiled_cache_[compiled_index];
+        } else {
+            const SampleStoreEntryHeader *entry = sampleStore.is_valid()
+                ? sampleStore.find_by_hash(slotcfg.sample_id) : nullptr;
+            if (entry) {
+                SampleDataFlash candidate;
+                has_playable_sample = sampleStore.get_sample_data(slotcfg.sample_id, &candidate);
+            } else {
+                has_playable_sample = i < compiled_num_voices_ && compiled_cache_[i];
+            }
+        }
+    }
+    if (!has_playable_sample) return false;
+
+    silence_all_voices_();
+    delay(6);
+    release_flash_pool_();
     flash_pool_count_ = 0;
 
     for (uint32_t i = 0; i < voices_to_load; ++i) {
@@ -311,7 +333,10 @@ bool BankManager::load_bank_config_(int slot) {
         sample[voice[i].sample].MIDINOTE = 0xFF;
     }
 
-    return (flash_pool_count_ > 0);
+    for (uint32_t i = 0; i < voices_to_load; ++i) {
+        if (sample_data[voice[i].sample] != nullptr) return true;
+    }
+    return false;
 #else
     (void)slot;
     return false;
@@ -372,24 +397,28 @@ void BankManager::refresh_bank(int slot) {
 #ifdef ENABLE_LITTLEFS
     if (slot < 1 || slot > MAX_FLASH_BANKS) return;
 
+    const bool is_active_bank = slot == active_bank_;
+    if (is_active_bank) {
+        sw.begin_bank_transition();
+        while (!sw.bank_transition_is_silent()) delayMicroseconds(50);
+    }
+
     detect_single_bank_(slot);
 
-    if (slot != active_bank_) return; // not currently playing - cache update is enough
+    if (!is_active_bank) return; // not currently playing - cache update is enough
 
     if (!bank_valid_[slot]) {
         // The active bank's config just became invalid (e.g. emptied out) -
         // silence rather than risk playing back a half-applied config.
         if (Serial) Serial.printf("BankMgr: active bank %d became invalid after refresh - silencing\n", slot);
         silence_all_voices_();
+        sw.finish_bank_transition();
         return;
     }
 
-    // Mirrors switch_bank()'s audio-safety dance (silence, let any in-flight
-    // buffer fill finish) since we're swapping sample_data[] pointers live.
-    silence_all_voices_();
-    delay(6);
     load_bank_config_(slot);
     if (Serial) Serial.printf("BankMgr: hot-reloaded active bank %d after live config upload\n", slot);
+    sw.finish_bank_transition();
 #else
     (void)slot;
 #endif

@@ -81,8 +81,14 @@ function buildSlotConfigBytes(bankSlotsArr) {
 
 function buildBankNameBytes(name) {
   const buf = new Uint8Array(BANK_NAME_MAX);
-  const enc = new TextEncoder().encode((name || '').substring(0, BANK_NAME_MAX - 1));
-  buf.set(enc);
+  const encoder = new TextEncoder();
+  let offset = 0;
+  for (const character of name || '') {
+    const bytes = encoder.encode(character);
+    if (offset + bytes.length >= BANK_NAME_MAX) break;
+    buf.set(bytes, offset);
+    offset += bytes.length;
+  }
   return buf;
 }
 
@@ -141,6 +147,12 @@ function parseBankConfigFileText(text) {
 // slots: device-reported descriptors, fetched via SYSEX_TYPE_GET_SLOTS_REQ.
 // Positional and authoritative - never invented/edited by this tool.
 let slots = [];  // [{ label, note, channel }]
+let compiledSamples = [];
+let currentCfg  = null;  // raw config payload from last SYSEX_TYPE_CONFIG_RESP
+let bankNames = {};
+let midiOutput = null;
+let settingsDirty = false;
+let settingsBusy = false;
 // bankSlots: the bank being edited, same length/order as slots. sampleId
 // references an entry in sampleList by content hash (0 = unassigned), or a
 // compiled-voice index when isCompiled is true - see buildSlotConfigBytes.
@@ -166,6 +178,9 @@ const SAMPLE_TYPES = ['Unset', 'Kick', 'Stick', 'Clap', 'Snare', 'Cymbal', 'Tamb
 // treats this file as opaque bytes - format and meaning live entirely here.
 // { [key]: { type: 'Kick'|...|'Unset', tags: string[] } }
 let sampleMeta = {};
+let sampleMetaDirty = false;
+let sampleMetaBusy = false;
+let sampleMetaRevision = 0;
 
 function sampleMetaKeyForHash(hash) {
   return hash.toString(16);
@@ -192,12 +207,18 @@ function setSampleMetaType(key, type) {
   const m = sampleMeta[key] || { type: 'Unset', tags: [] };
   m.type = type;
   sampleMeta[key] = m;
+  sampleMetaDirty = true;
+  ++sampleMetaRevision;
+  updateSampleActions();
 }
 
 function setSampleMetaTags(key, tags) {
   const m = sampleMeta[key] || { type: 'Unset', tags: [] };
   m.tags = tags;
   sampleMeta[key] = m;
+  sampleMetaDirty = true;
+  ++sampleMetaRevision;
+  updateSampleActions();
 }
 
 // Parses/serializes /save/sample_meta.txt: one line per entry,
@@ -254,6 +275,8 @@ function guessSampleType(filename) {
 
 async function fetchSampleMetaFromDevice() {
   if (!midiOutput) throw new Error('Not connected via MIDI');
+  if (sampleMetaDirty || sampleMetaBusy) return sampleMeta;
+  const revision = sampleMetaRevision;
 
   const info = await requestSysexResponse(
     SYSEX_TYPE_GET_SAMPLE_META_INFO_REQ,
@@ -264,7 +287,7 @@ async function fetchSampleMetaFromDevice() {
   );
   const totalBytes = decodeU32_7bit(info.payload || [], 0);
   if (totalBytes === 0) {
-    sampleMeta = {};
+    if (sampleMetaRevision === revision) sampleMeta = {};
     return sampleMeta;
   }
 
@@ -302,11 +325,12 @@ async function fetchSampleMetaFromDevice() {
   }
 
   const text = new TextDecoder().decode(full.slice(0, offset));
-  sampleMeta = parseSampleMetaText(text);
+  if (sampleMetaRevision === revision) sampleMeta = parseSampleMetaText(text);
   return sampleMeta;
 }
 
 async function writeSampleMetaToDevice() {
+  if (sampleMetaBusy) return;
   if (!midiOutput) { setStatus('Connect via Web MIDI first.', true); return; }
 
   const text = buildSampleMetaText(sampleMeta);
@@ -317,6 +341,9 @@ async function writeSampleMetaToDevice() {
   }
 
   setStatus('Saving sample metadata to device…');
+  const revision = sampleMetaRevision;
+  sampleMetaBusy = true;
+  updateSampleActions();
   showProgress(0);
   try {
     const chunkSize = SYSEX_META_WRITE_RAW_CHUNK_BYTES;
@@ -344,13 +371,27 @@ async function writeSampleMetaToDevice() {
       showProgress((offset + chunk.length) / bytes.length);
     }
     hideProgress();
+    if (sampleMetaRevision === revision) sampleMetaDirty = false;
     setStatus('✓ Sample metadata saved to device.', false, true);
   } catch (e) {
     hideProgress();
     setStatus(`Save failed: ${(e && e.message) || e}`, true);
+  } finally {
+    sampleMetaBusy = false;
+    updateSampleActions();
   }
 }
 window.writeSampleMetaToDevice = writeSampleMetaToDevice;
+
+function updateSampleActions() {
+  const form = document.getElementById('sample-tags-form');
+  if (form) form.disabled = !midiOutput || sampleMetaBusy;
+  const save = document.getElementById('save-tags-btn');
+  if (save) save.disabled = !midiOutput || sampleMetaBusy || !sampleMetaDirty;
+  const state = document.getElementById('sample-tags-state');
+  if (state) state.textContent = sampleMetaBusy ? 'Saving tags...'
+    : sampleMetaDirty ? 'Unsaved tags' : '';
+}
 
 function emptyBankSlot() {
   return { sampleId: 0, volume: 127, midiNote: 0, isCompiled: false };
@@ -380,6 +421,7 @@ function resetBankSlotsForCurrentSlots() {
 //   template that was never read from/written to a real slot.
 let bankDirty = false;
 let loadedForSlot = null;
+let bankBusy = false;
 // bankValidity[slot] = true/false once known (via GET_BANK_INFO_REQ), absent if unknown.
 let bankValidity = {};
 
@@ -395,26 +437,27 @@ function updateBankStateBanner() {
   if (!activeEl || !stateEl) return;
 
   const selectedSlot = parseInt(document.getElementById('bank-slot').value);
-  const activeBankEl = document.getElementById('cfg-active-bank');
-  const activeBank = activeBankEl ? parseInt(activeBankEl.value) : NaN;
+  const activeBank = currentCfg ? currentCfg[0] : NaN;
 
   if (!isNaN(activeBank)) {
     activeEl.textContent = (selectedSlot === activeBank)
-      ? `Editing slot ${selectedSlot} — this is the device's currently active bank.`
-      : `Editing slot ${selectedSlot} — the device is currently playing bank ${activeBank}.`;
+      ? `Editing bank ${selectedSlot} · currently active bank`
+      : `Editing bank ${selectedSlot} · playing bank ${activeBank}`;
   } else {
     activeEl.textContent = '';
   }
 
   if (bankDirty) {
-    stateEl.textContent = '● Unsaved changes — click 💾 Save Bank to Device to apply them (live, no reboot needed).';
+    stateEl.textContent = 'Unsaved bank changes';
     stateEl.style.color = 'var(--accent)';
   } else if (loadedForSlot !== selectedSlot) {
-    stateEl.textContent = 'This bank slot has not been read from the device yet — showing a blank/unrelated template. Use ⬆ Read Bank from Device first if you want to see what’s actually there before editing.';
+    stateEl.textContent = bankBusy ? 'Loading bank...' : 'Bank not loaded';
     stateEl.style.color = 'var(--muted)';
   } else {
-    stateEl.textContent = '';
+    stateEl.textContent = bankBusy ? 'Saving...' : 'No unsaved bank changes';
+    stateEl.style.color = 'var(--muted)';
   }
+  updateBankActionAvailability();
 }
 
 function updateBankSlotOptionLabels() {
@@ -422,17 +465,44 @@ function updateBankSlotOptionLabels() {
   if (!sel) return;
   for (const opt of sel.options) {
     const slot = parseInt(opt.value);
-    opt.textContent = (bankValidity[slot] === false) ? `Slot ${slot} (empty)` : `Slot ${slot}`;
+    const name = bankNames[slot] ? `: ${bankNames[slot]}` : '';
+    opt.textContent = `Bank ${slot}${name}${bankValidity[slot] === false ? ' (empty)' : ''}`;
+  }
+  const playing = document.getElementById('cfg-active-bank');
+  if (playing) for (const option of playing.options) {
+    const bank = Number(option.value);
+    if (bank === 0) continue;
+    option.textContent = `Bank ${bank}${bankNames[bank] ? ': ' + bankNames[bank] : ''}${bankValidity[bank] === false ? ' (empty)' : ''}`;
+    option.disabled = bankValidity[bank] === false;
   }
 }
 
 function updateBankActionAvailability() {
   const slot = parseInt(document.getElementById('bank-slot').value);
+  const connected = !!midiOutput && slots.length > 0;
+  const form = document.getElementById('bank-form');
+  if (form) form.disabled = !connected || bankBusy || loadedForSlot === null;
+  const save = document.getElementById('save-bank-btn');
+  if (save) save.disabled = !connected || bankBusy || !bankDirty || loadedForSlot !== slot;
+  const copy = document.getElementById('copy-bank-btn');
+  if (copy) copy.disabled = !connected || bankBusy || loadedForSlot !== slot;
+  const play = document.getElementById('play-bank-btn');
+  if (play) play.disabled = !connected || bankBusy || settingsBusy || bankDirty
+    || bankValidity[slot] !== true || (currentCfg && currentCfg[0] === slot);
+  const playing = document.getElementById('cfg-active-bank');
+  if (playing) playing.disabled = !connected || !currentCfg || bankBusy || settingsBusy;
+  const role = document.getElementById('cfg-momentary-role');
+  if (role) role.disabled = !connected || !currentCfg || currentCfg.length < 148 || bankBusy || settingsBusy;
+  const saveSettings = document.getElementById('save-settings-btn');
+  if (saveSettings) saveSettings.disabled = !midiOutput || !currentCfg || bankBusy || settingsBusy;
+  const refresh = document.getElementById('refresh-device-btn');
+  if (refresh) refresh.disabled = bankBusy || settingsBusy;
+  for (const button of document.querySelectorAll?.('.audition-button') || []) {
+    button.disabled = !connected || bankBusy || bankDirty || !currentCfg || currentCfg[0] !== loadedForSlot;
+  }
   const pullBtn = document.getElementById('pull-from-device-btn');
   if (!pullBtn) return;
-  const known = bankValidity[slot];
-  pullBtn.disabled = (known === false);
-  pullBtn.title = (known === false) ? 'This bank slot is empty on the device — nothing to read.' : '';
+  pullBtn.disabled = !connected || bankBusy || !bankDirty;
 }
 
 // Best-effort: query each bank slot's validity so the slot dropdown and Read
@@ -454,11 +524,86 @@ async function refreshBankValidity() {
   updateBankActionAvailability();
 }
 
-function onBankSlotChanged() {
+async function onBankSlotChanged() {
+  const selector = document.getElementById('bank-slot');
+  const previous = loadedForSlot;
+  const slot = Number(selector.value);
+  if (bankBusy || (bankDirty && !confirm('Discard unsaved bank changes?'))) {
+    if (previous !== null) selector.value = previous;
+    return;
+  }
+  if (!midiOutput) return;
+  bankBusy = true;
   updateBankActionAvailability();
-  updateBankStateBanner();
+  try {
+    if (bankValidity[slot] === false) throw new Error('Device NACK 4');
+    await readBankConfigViaMidiRuntime(slot);
+  } catch (error) {
+    if (error.message.includes('NACK 4')) {
+      bankValidity[slot] = false;
+      resetBankSlotsForCurrentSlots();
+      document.getElementById('bank-name').value = `Bank ${slot}`;
+      bankDirty = false;
+      loadedForSlot = slot;
+      updateBankSlotOptionLabels();
+      updateSlotTable();
+      setStatus(`Bank ${slot} is empty.`);
+    } else {
+      if (previous !== null) selector.value = previous;
+      setStatus('Could not load bank: ' + error.message, true);
+    }
+  } finally {
+    bankBusy = false;
+    hideProgress();
+    updateBankActionAvailability();
+    updateBankStateBanner();
+  }
 }
 window.onBankSlotChanged = onBankSlotChanged;
+
+async function playEditedBank() {
+  if (bankBusy || bankDirty || loadedForSlot === null) return;
+  document.getElementById('cfg-active-bank').value = loadedForSlot;
+  await applyConfigLive();
+}
+window.playEditedBank = playEditedBank;
+
+function openCopyBankDialog() {
+  if (bankBusy || loadedForSlot === null) return;
+  const target = document.getElementById('copy-bank-target');
+  target.innerHTML = '';
+  for (let bank = 1; bank <= 4; ++bank) {
+    if (bank === loadedForSlot) continue;
+    const option = document.createElement('option');
+    option.value = bank;
+    option.textContent = `Bank ${bank}${bankValidity[bank] === false ? ' (empty)' : ''}`;
+    target.appendChild(option);
+  }
+  document.getElementById('copy-bank-source').textContent =
+    `Source: bank ${loadedForSlot}${bankDirty ? ' · unsaved edits included' : ''}`;
+  document.getElementById('copy-bank-dialog').showModal();
+}
+window.openCopyBankDialog = openCopyBankDialog;
+
+async function copyBankToDevice() {
+  const target = Number(document.getElementById('copy-bank-target').value);
+  if (await writeBankToDevice(target)) document.getElementById('copy-bank-dialog').close();
+}
+window.copyBankToDevice = copyBankToDevice;
+
+function updateSettingsState() {
+  const state = document.getElementById('settings-save-state');
+  if (state) state.textContent = settingsBusy ? 'Updating settings...'
+    : !midiOutput || !currentCfg ? 'Not connected' : settingsDirty ? 'Unsaved settings' : 'Settings loaded';
+  const save = document.getElementById('save-settings-btn');
+  if (save) save.disabled = !midiOutput || !currentCfg || settingsBusy;
+  const playing = document.getElementById('cfg-active-bank');
+  if (playing) playing.disabled = !midiOutput || !currentCfg || settingsBusy || bankBusy;
+  const role = document.getElementById('cfg-momentary-role');
+  if (role) role.disabled = !midiOutput || !currentCfg || currentCfg.length < 148 || settingsBusy;
+  updateBankActionAvailability();
+  updateSampleActions();
+}
 
 function updateSlotsGateUI() {
   const gate   = document.getElementById('slots-gate');
@@ -668,21 +813,18 @@ function undoReplaceDeviceSample(hash) {
 }
 window.undoReplaceDeviceSample = undoReplaceDeviceSample;
 
-// Compiled-in (built-in firmware) samples are exposed as first-class picker
-// entries alongside SampleStore ones (Phase F.6) - their names come from the
-// already-fetched slots[]/GET_SLOTS_REQ labels, positionally: compiled voice
-// index N corresponds to slots[N]. Any slot can pick any compiled voice's
-// sample, not just its own.
+// Compiled-in picker IDs follow the device's compiled-voice catalog, not
+// output-slot positions. Labels are matched to output slots by original note.
 function sampleOptionsHtml(selectedId, isCompiledSelected) {
   let html = `<option value="0"${(!selectedId && !isCompiledSelected) ? ' selected' : ''}>— none / unassigned —</option>`;
-  if (slots.length) {
+  if (compiledSamples.length) {
     html += `<optgroup label="Compiled-in (built-in kit)">`;
-    for (let ci = 0; ci < slots.length; ci++) {
-      const sel = (isCompiledSelected && selectedId === ci) ? ' selected' : '';
-      const key = sampleMetaKeyForCompiled((slots[ci] && slots[ci].label) || `voice ${ci}`);
+    for (const compiled of compiledSamples) {
+      const sel = (isCompiledSelected && selectedId === compiled.index) ? ' selected' : '';
+      const key = sampleMetaKeyForCompiled(compiled.label);
       if (!sel && !sampleMatchesFilter(key)) continue;
-      const label = escapeHtml((slots[ci] && slots[ci].label) || `voice ${ci}`);
-      html += `<option value="c:${ci}"${sel}>Compiled: ${label}</option>`;
+      const label = escapeHtml(compiled.label);
+      html += `<option value="c:${compiled.index}"${sel}>Compiled: ${label}</option>`;
     }
     html += `</optgroup>`;
   }
@@ -1311,11 +1453,12 @@ function updateSlotTable() {
       <td><input type="number" min="0" max="127" value="${s.volume}" style="width:56px"
            onchange="setSlotField(${i}, 'volume', parseInt(this.value)||0)"></td>
       <td style="white-space:nowrap">
-        <button class="btn audition-button" data-note="${slot.note}" style="padding:.2rem .5rem" title="Audition on device (active bank only)" onclick="auditionSlotDevice(${i})">🔊</button>
+        <button class="btn audition-button" data-note="${slot.note}" style="padding:.2rem .5rem" title="Audition saved ${escapeHtml(slot.label)}" aria-label="Audition ${escapeHtml(slot.label)}" ${!midiOutput || bankDirty || !currentCfg || currentCfg[0] !== loadedForSlot ? 'disabled' : ''} onclick="auditionSlotDevice(${i})"><i data-lucide="volume-2" aria-hidden="true"></i></button>
       </td>`;
     tbody.appendChild(tr);
   }
   updateBankStateBanner();
+  window.lucide?.createIcons();
 }
 
 function setSlotField(i, field, value) {
@@ -1405,11 +1548,21 @@ window.onBankFilterChanged = onBankFilterChanged;
 // ============================================================================
 // Live bank-config save/read
 // ============================================================================
-async function writeBankToDevice() {
+async function writeBankToDevice(destination = null) {
+  if (bankBusy) return false;
   if (!midiOutput) { setStatus('Connect via Web MIDI first.', true); return; }
   if (slots.length === 0) { setStatus('Connect via Web MIDI first so slot notes are known.', true); return; }
 
-  const slot = parseInt(document.getElementById('bank-slot').value);
+  const source = Number(document.getElementById('bank-slot').value);
+  const slot = destination === null ? source : Number(destination);
+  if (loadedForSlot !== source || !Number.isInteger(slot) || slot < 1 || slot > 4) return false;
+  const copying = slot !== source;
+  if (destination !== null && !copying) return false;
+  if (copying && (bankValidity[slot] !== false || (currentCfg && currentCfg[0] === slot))
+      && !confirm(`Replace bank ${slot} with a copy of bank ${source}?${currentCfg && currentCfg[0] === slot ? ' This bank is playing; its sound will change immediately.' : ''} This cannot be undone.`)) return false;
+  if (!copying && currentCfg && currentCfg[0] === slot
+      && !bankSlots.some(item => item.isCompiled || item.sampleId !== 0)
+      && !confirm(`Bank ${slot} is playing. Saving an empty bank will silence it. Continue?`)) return false;
   const bankName = document.getElementById('bank-name').value || '';
   const text = buildBankConfigFileText(bankName, bankSlots);
   const bytes = new TextEncoder().encode(text);
@@ -1420,6 +1573,8 @@ async function writeBankToDevice() {
   }
 
   setStatus(`Saving bank ${slot} to device…`);
+  bankBusy = true;
+  updateBankActionAvailability();
   showProgress(0);
   try {
     const chunkSize = SYSEX_BANK_WRITE_RAW_CHUNK_BYTES;
@@ -1451,49 +1606,41 @@ async function writeBankToDevice() {
     }
 
     hideProgress();
-    bankDirty = false;
-    loadedForSlot = slot;
-    bankValidity[slot] = true;
+    if (!copying) {
+      bankDirty = false;
+      loadedForSlot = slot;
+    }
+    bankValidity[slot] = bankSlots.some(item => item.isCompiled || item.sampleId !== 0);
+    bankNames[slot] = bankName;
     updateBankSlotOptionLabels();
     updateBankActionAvailability();
     updateBankStateBanner();
-    setStatus(`✓ Bank ${slot} saved to device — applied immediately, no reboot needed.`, false, true);
+    setStatus(copying ? `Copied bank ${source} to bank ${slot}.${currentCfg && currentCfg[0] === slot ? ' Playing bank updated.' : ''}`
+      : `Bank ${slot} saved${currentCfg && currentCfg[0] === slot ? ' and playing' : ''}.`, false, true);
+    return true;
   } catch (e) {
     hideProgress();
     setStatus(`Save failed: ${(e && e.message) || e}`, true);
+    return false;
+  } finally {
+    bankBusy = false;
+    updateBankActionAvailability();
+    updateBankStateBanner();
   }
 }
 window.writeBankToDevice = writeBankToDevice;
 
 async function readFromDevice(confirmFirst = true) {
-  const slot = parseInt(document.getElementById('bank-slot').value);
-
-  if (confirmFirst && !confirm(`Overwrite changes in browser with data from device bank ${slot}?`)) {
-    return;
-  }
-
-  if (!midiOutput) {
-    setStatus('Read from Device uses runtime MIDI. Connect via Web MIDI (top of page) first.', true);
-    return;
-  }
-  try {
-    await readBankConfigViaMidiRuntime(slot);
-    setStatus(`✓ Read bank ${slot} via MIDI runtime`, false, true);
-  } catch (e) {
-    const msg = (e && e.message) || String(e);
-    if (msg.includes('NACK 4')) {
-      bankValidity[slot] = false;
-      updateBankSlotOptionLabels();
-      updateBankActionAvailability();
-      setStatus(`Bank ${slot} appears to be empty on the device — nothing to read.`, true);
-    } else {
-      setStatus(`Runtime MIDI read failed: ${msg}`, true);
-    }
-  }
+  return onBankSlotChanged();
 }
 window.readFromDevice = readFromDevice;
 
 async function rebootToBootloader() {
+  if (bankBusy || sampleMetaBusy || settingsBusy) {
+    setStatus('Wait for the current transfer before rebooting.', true);
+    return;
+  }
+  if (settingsDirty && !confirm('Unsaved settings will be lost on reboot. Continue?')) return;
   // Try via SysEx first (device stays running), fall back to manual instruction.
   if (midiOutput) {
     sendCompulidianSysexFrame(SYSEX_TYPE_REBOOT_REQ, 0, 0, []);
@@ -1638,10 +1785,8 @@ const OUTPUT_LABELS  = ['Pulse 1', 'Pulse 2', 'CV 1', 'CV 2'];
 const CV_LABELS      = ['CV 1', 'CV 2'];
 const KNOB_LABELS    = ['Main', 'X', 'Y'];
 
-let midiOutput  = null;
 let midiInput   = null;
 let midiInputsBound = [];
-let currentCfg  = null;  // raw config payload from last SYSEX_TYPE_CONFIG_RESP
 
 const midiPendingRequests = new Map();
 let midiNextRequestId = 1;
@@ -1656,7 +1801,7 @@ const MIDI_BANK_CHUNK_TIMEOUT_MS = 5000;
 const MIDI_RECONNECT_MAX_ATTEMPTS = 8;
 const MIDI_RECONNECT_BASE_DELAY_MS = 400;
 const MIDI_WATCHDOG_INTERVAL_MS = 800;
-const MIDI_DEBUG = true;
+const MIDI_DEBUG = false;
 const MIDI_BIND_ALL_INPUTS = false;
 const MIDI_LOG_MAX_LINES = 220;
 const MIDI_RUNTIME_TAG = 'midi-runtime-2026-08-02';
@@ -1777,6 +1922,7 @@ function resetMidiBinding() {
   midiOutput = null;
   midiDot(false);
   document.getElementById('midi-device-name').textContent = 'Not connected';
+  updateSettingsState();
 }
 
 function bindMidiInputListener(input) {
@@ -1985,9 +2131,7 @@ async function readBankConfigViaMidiRuntime(slot) {
   const text = new TextDecoder().decode(full);
   const { bankName, slots: parsedSlots } = parseBankConfigFileText(text);
 
-  if (bankName) {
-    document.getElementById('bank-name').value = bankName;
-  }
+  document.getElementById('bank-name').value = bankName || `Bank ${slot}`;
 
   bankSlots = slots.map((_, i) => parsedSlots[i] || emptyBankSlot());
   // Ignore whatever midi_note byte was actually stored on disk - always
@@ -2000,7 +2144,7 @@ async function readBankConfigViaMidiRuntime(slot) {
   updateBankActionAvailability();
   updateSlotTable();
 
-  const assignedCount = bankSlots.filter(s => s.sampleId).length;
+  const assignedCount = bankSlots.filter(s => s.isCompiled || s.sampleId !== 0).length;
   setStatus(`✓ Loaded "${bankName || 'Bank'}" — ${assignedCount} sample(s) assigned`, false, true);
 }
 
@@ -2185,6 +2329,7 @@ function requestSysexResponse(type, payload = [], expectedTypes = [SYSEX_TYPE_CO
 }
 
 async function midiConnect(isReconnectAttempt = false) {
+  if (bankBusy || settingsBusy || sampleMetaBusy) return;
   clearReconnectTimer();
   try {
     await ensureMidiEnabled();
@@ -2244,6 +2389,7 @@ async function midiConnect(isReconnectAttempt = false) {
   try {
     await fetchSampleList();
     const hint = document.getElementById('samples-empty-hint');
+    try { await fetchSampleMetaFromDevice(); } catch (error) { midiDebug('sample tags unavailable', error.message); }
     if (hint) hint.style.display = sampleList.length ? 'none' : 'block';
     updateSlotTable();
     renderDeviceSamplesList();
@@ -2256,6 +2402,12 @@ async function midiConnect(isReconnectAttempt = false) {
   } catch (e) {
     midiDebug('bank validity refresh failed', e && e.message);
   }
+  if (!bankDirty && slots.length && !bankBusy) {
+    if (loadedForSlot === null && currentCfg && currentCfg[0] > 0)
+      document.getElementById('bank-slot').value = currentCfg[0];
+    await onBankSlotChanged();
+  }
+  updateSettingsState();
 }
 window.midiConnect = midiConnect;
 
@@ -2288,8 +2440,21 @@ async function fetchDeviceSlots() {
     parsedSlots.push({ note: note > 0x7E ? -1 : note, channel, label });
   }
 
+  if (pos >= p.length) throw new Error('Compiled sample catalog missing; update device firmware.');
+  const compiledCount = p[pos++] & 0x7F;
+  if (pos + compiledCount > p.length) throw new Error('Truncated compiled sample catalog');
+  const parsedCompiledSamples = [];
+  for (let index = 0; index < compiledCount; index++) {
+    const note = p[pos++] & 0x7F;
+    const matchingSlot = parsedSlots.find(slot => slot.note === note);
+    const label = matchingSlot ? matchingSlot.label : (GM_PERC[note] || `Note ${note}`);
+    parsedCompiledSamples.push({ index, note, label });
+  }
+
   const sameLength = parsedSlots.length === slots.length;
+  if (!sameLength && bankDirty) throw new Error('Device slots changed; save or discard the current bank draft first.');
   slots = parsedSlots;
+  compiledSamples = parsedCompiledSamples;
   if (!sameLength) resetBankSlotsForCurrentSlots();
   else syncBankSlotNotesToDevice();
   updateSlotsGateUI();
@@ -2315,23 +2480,33 @@ window.readConfig = () => readConfig().catch(e => {
 });
 
 async function saveConfig() {
+  if (settingsBusy || bankBusy) return;
   if (!midiOutput) {
     setConfigStatus('Not connected.', true, false);
     throw new Error('Not connected');
   }
   const d = buildCfgFromUI();
   d.push(1); // persist=1 -> write to flash so it survives a reboot
+  if (currentCfg && currentCfg.length >= 148)
+    d.push(Number(document.getElementById('cfg-momentary-role').value));
   setConfigStatus('Config sent. Waiting for confirmation…', false, false);
+  settingsBusy = true;
+  updateSettingsState();
   try {
     await requestSysexResponse(
       SYSEX_TYPE_SET_CONFIG_REQ,
       d,
       [SYSEX_TYPE_CONFIG_RESP]
     );
-    setConfigStatus('Config saved and confirmed by device.', false, true);
+    settingsDirty = false;
+    setConfigStatus('Settings saved.', false, true);
   } catch (e) {
+    if (currentCfg) applyCfgToUI(currentCfg);
     setConfigStatus('Config send failed: ' + e.message, true, false);
     throw e;
+  } finally {
+    settingsBusy = false;
+    updateSettingsState();
   }
 }
 window.saveConfig = () => saveConfig().catch(e => {
@@ -2343,19 +2518,29 @@ window.saveConfig = () => saveConfig().catch(e => {
 // role tweak without wearing the flash's limited rewrite lifetime. An
 // explicit "Save to Device" is still required to persist the change.
 async function applyConfigLive() {
+  if (settingsBusy || bankBusy) return;
   updateBankStateBanner();
   if (!midiOutput) return;
   const d = buildCfgFromUI();
   d.push(0); // persist=0 -> apply only, do not write to flash
+  if (currentCfg && currentCfg.length >= 148)
+    d.push(Number(document.getElementById('cfg-momentary-role').value));
+  settingsBusy = true;
+  updateSettingsState();
   try {
     await requestSysexResponse(
       SYSEX_TYPE_SET_CONFIG_REQ,
       d,
       [SYSEX_TYPE_CONFIG_RESP]
     );
-    setConfigStatus('Applied (not saved to flash — click 💾 Save to Device to make it permanent).', false, true);
+    settingsDirty = true;
+    setConfigStatus('Settings applied. Not saved.', false, true);
   } catch (e) {
+    if (currentCfg) applyCfgToUI(currentCfg);
     setConfigStatus('Live apply failed: ' + e.message, true, false);
+  } finally {
+    settingsBusy = false;
+    updateSettingsState();
   }
 }
 window.applyConfigLive = applyConfigLive;
@@ -2422,6 +2607,10 @@ function applyCfgToUI(d) {
   document.getElementById('knob-role-0').value = d[16];
   document.getElementById('knob-role-1').value = d[17];
   document.getElementById('knob-role-2').value = d[18];
+  const momentaryRole = document.getElementById('cfg-momentary-role');
+  momentaryRole.disabled = d.length < 148;
+  momentaryRole.value = d.length >= 148 ? d[147] : 0;
+  momentaryRole.title = d.length >= 148 ? '' : 'Update firmware to configure the switch role';
   // Bank names appended after settings data (32 bytes each, ASCII)
   const nameBase = 19;
   const dec = new TextDecoder();
@@ -2430,26 +2619,18 @@ function applyCfgToUI(d) {
     if (d.length < start + 1) break;
     const slice = d.slice(start, start + 32);
     const name  = dec.decode(Uint8Array.from(slice)).replace(/\0/g, '').trim();
+    bankNames[slot] = name;
     const opt   = document.querySelector(`#cfg-active-bank option[value="${slot}"]`);
     if (opt) opt.textContent = name ? `${slot} \u2014 ${name}` : `${slot} \u2014 Flash bank ${slot}`;
   }
+  updateBankSlotOptionLabels();
   updateBankStateBanner();
 }
 
 function buildCfgFromUI() {
-  const d = new Array(19).fill(0);
+  const d = currentCfg ? Array.from(currentCfg.slice(0, 19)) : new Array(19).fill(0);
   d[0] = parseInt(document.getElementById('cfg-active-bank').value);
   d[1] = 0; // num_valid_banks — read-only, device ignores it
-  for (let i = 0; i < 4; i++) {
-    d[2 + i * 3]     = parseInt(document.getElementById(`out-type-${i}`).value);
-    d[2 + i * 3 + 1] = parseInt(document.getElementById(`out-ch-${i}`).value);
-    d[2 + i * 3 + 2] = 0; // note (not editable in basic UI)
-  }
-  d[14] = parseInt(document.getElementById('cv-role-0').value);
-  d[15] = parseInt(document.getElementById('cv-role-1').value);
-  d[16] = parseInt(document.getElementById('knob-role-0').value);
-  d[17] = parseInt(document.getElementById('knob-role-1').value);
-  d[18] = parseInt(document.getElementById('knob-role-2').value);
   return d;
 }
 
@@ -2457,6 +2638,13 @@ function buildCfgFromUI() {
 renderOutputs();
 renderCVInputs();
 renderKnobs();
+updateSettingsState();
+window.lucide?.createIcons();
+window.addEventListener('beforeunload', event => {
+  if (!bankDirty && !bankBusy && !settingsDirty && !sampleMetaDirty && !sampleMetaBusy && !stagedSamples.length && !pendingDeletions.size) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 const midiRuntimeTagEl = document.getElementById('midi-runtime-tag');
 if (midiRuntimeTagEl) {

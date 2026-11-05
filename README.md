@@ -32,9 +32,79 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 | X knob + CV2      | Control density multiplier of the second bank of Euclidian tracks (hihats...), from 0x to 1.5x                  |
 | Y knob            | Controls tempo of internal clock, from 30BPM to 180 (disabled when slaved to external clock).                   |
 | Switch UP (hold)  | Freeze the random seed, so same pattern will continue playing.  Fills and density still take effect.            |
-| Switch DOWN (mom) | Mutes the sequencer so no new notes will play.  LEDs will flash on the beat.                                    |
+| Switch DOWN (mom) | Mutes new notes by default, or selects a sample bank when configured below.                                    |
 | Audio In 1 (CV)   | Bipolar CV controls shuffle amount (negative CV inverts the shuffle)                                            |
 | Audio In 2 (CV)   | Bipolar CV controls sampleplayer pitch (negative lower, positive higher)                                        |
+
+### Standalone bank and switch setup
+
+On the 16 MB firmware, hold the momentary switch DOWN during power-up until
+the bank LED blinks, then release it. Playback and clock servicing continue
+throughout setup.
+
+- Main selects a sample bank; only detected valid banks are offered.
+- X selects the momentary switch role: low = Mute, high = Bank Select.
+- The first five LEDs represent banks 0-4, one LED per bank. The first LED
+  means bank 0, the compiled-in kit. The sixth LED is off for Mute and on
+  for Bank Select.
+- Neither knob changes the existing selection until deliberately moved.
+- Tap the momentary switch DOWN and release to save and exit. All LEDs
+  briefly light on success; a failed bank load blinks them and leaves setup
+  open with the previous bank and role intact.
+
+Mute is the default: holding DOWN and turning knobs remains the normal
+mute-and-adjust performance gesture. With Bank Select enabled, holding DOWN
+temporarily borrows Main to choose a bank without muting new notes. Release
+to load and remember that bank. Selection does not load banks while the knob
+is moving. Bank loading fades the output briefly to silence and back; existing
+sample tails stop at the fade and are not carried across as a crossfade.
+The latched UP position still freezes the random seed in either role.
+
+Borrowed knobs retain their previous density contribution until returned to
+their previous position (pickup); CV modulation continues. Main uses pickup
+after bank selection, and both Main and X use it after startup setup.
+
+The same role is available under **Settings > Momentary switch** in
+the web manager. Changes apply live; **Save settings** makes them survive a
+reboot. Older firmware leaves the role control disabled. Startup setup is
+always available, regardless of the saved role.
+
+### Web bank workflow
+
+Serve `tools/web/` over localhost and open `compulidian_manager.html` in a
+Web MIDI-capable browser, then connect to the device. For example:
+
+```sh
+python3 -m http.server 8082 --directory tools/web
+```
+
+Open `http://localhost:8082/compulidian_manager.html`.
+
+- **Playing bank** changes playback immediately without changing the editor.
+  **Save settings** remembers the playing bank and momentary switch role
+  across reboot. This does not save bank edits or sample tags.
+- **Edit bank** automatically loads one of the four editable bank slots.
+  Empty slots start with an unassigned draft. Browsing does not switch playback.
+  Leaving a modified draft requires confirmation; failed reads keep it intact.
+- **Save bank** writes the editor contents to that slot. If the slot is
+  playing, its sound updates immediately. **Discard** reloads its saved contents.
+- **Copy to...** writes the current editor contents, including unsaved edits,
+  into another editable slot. It leaves the source draft, edit selection and
+  playing bank number unchanged. Existing destinations require confirmation;
+  copying onto the playing bank updates its sound immediately.
+- **Play bank** selects the saved editor bank for playback. Save edits first.
+  Bank 0 remains the fixed compiled-in kit, available in **Playing bank**.
+- **Samples > Save tags** saves sample types and tags separately. Refreshes
+  preserve unsaved tag edits. **Export staged samples** exports only the
+  staged audio library, not the installed samples or bank configurations.
+- Sample updates are still downloaded as UF2 files and installed manually.
+  Full storage replacement and MIDI diagnostics are secondary device tools.
+
+The Device tab shows the current fixed input routing. Configurable CV and
+knob routing is not implemented yet; stored routing fields are retained when
+saving the supported settings. Unsaved drafts survive reconnects within the
+open page, but are not an offline backup. Closing or reloading warns about
+unsaved work.
 
 ### MIDI features
 

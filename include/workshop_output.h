@@ -21,6 +21,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
 
   public:
     bool muted = false;
+    bool control_leds_owned = false;
     bool debug = false;
     SamplePlayer *sw = nullptr;
 
@@ -43,11 +44,13 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
     }
 
     void all_leds_on() {
+        if (control_leds_owned) return;
         for (int i = 0 ; i < sw->numLeds ; i++) {
             sw->LedOn(i);
         }
     }
     void all_leds_off() {
+        if (control_leds_owned) return;
         for (int i = 0 ; i < sw->numLeds ; i++) {
             sw->LedOff(i);
         }
@@ -140,7 +143,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         int8_t output_number = get_output_number_for_note(pitch);
 
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            sw->LedOn(output_number % sw->numLeds);
+            if (!control_leds_owned) sw->LedOn(output_number % sw->numLeds);
 
             gateWrite(output_number, HIGH);
         }
@@ -164,7 +167,7 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
         int8_t output_number = get_output_number_for_note(pitch);
 
         if (channel==GM_CHANNEL_DRUMS && output_number>=0) {
-            sw->LedOff(output_number % sw->numLeds);
+            if (!control_leds_owned) sw->LedOff(output_number % sw->numLeds);
 
             gateWrite(output_number, LOW);
         }
@@ -173,3 +176,5 @@ class WorkshopOutputWrapper : public IMIDINoteAndCCTarget {
     }
 
 };
+
+extern WorkshopOutputWrapper output_wrapper;

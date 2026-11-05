@@ -23,6 +23,38 @@ volatile uint32_t pulse_1_transitions;
 
 #ifdef USE_TINYUSB
 
+  static void print_sequencer_state() {
+    Serial.printf("State: ticks=%lu ready=%u knobs=%ld,%ld,%ld cv=%ld,%ld audio=%ld,%ld\n",
+        (unsigned long)ticks, (unsigned)sw.SwitchReady(),
+        (long)sw.KnobVal(ComputerCard::Main), (long)sw.KnobVal(ComputerCard::X), (long)sw.KnobVal(ComputerCard::Y),
+        (long)sw.CVIn(0), (long)sw.CVIn(1), (long)sw.AudioIn(0), (long)sw.AudioIn(1));
+    Serial.printf("Clock: playing=%u mode=%d bpm=%.3f\n", (unsigned)playing, (int)clock_mode, get_bpm());
+    if (sequencer == nullptr) {
+      Serial.println("Sequencer not ready");
+      return;
+    }
+    auto* euclidian = static_cast<EuclidianSequencer*>(sequencer);
+    Serial.printf("Sequencer: running=%u seed=%d seed_lock=%u mutate=%u mutations=%d/%d\n",
+        (unsigned)sequencer->is_running(), euclidian->get_euclidian_seed(),
+        (unsigned)euclidian->is_euclidian_seed_lock(), (unsigned)euclidian->is_mutate_enabled(),
+        (int)euclidian->get_mutation_count(), (int)euclidian->get_effective_mutation_count());
+    for (unsigned int index = 0; index < sequencer->get_number_patterns(); ++index) {
+      auto* pattern = static_cast<EuclidianPattern*>(sequencer->get_pattern(index));
+      if (pattern == nullptr) continue;
+      Serial.printf("Pattern[%u] %s density=%.5f locked=%u dirty=%u held=%u on_tick=%lu gate_ticks=%d output_enabled=%u\n",
+          index, pattern->get_output_label(), pattern->get_global_density(), (unsigned)pattern->is_locked(),
+          (unsigned)pattern->needs_recompute, (unsigned)pattern->note_held,
+          (unsigned long)pattern->triggered_on_tick, (int)pattern->current_duration,
+          (unsigned)(pattern->get_output() != nullptr && pattern->get_output()->is_enabled()));
+      Serial.printf("  base=%d/%d+%d duration=%d used=%d/%d+%d duration=%d post_pulses=%d\n",
+          (int)pattern->arguments.steps, (int)pattern->arguments.pulses,
+          (int)pattern->arguments.rotation, (int)pattern->arguments.duration,
+          (int)pattern->used_arguments.steps, (int)pattern->used_arguments.pulses,
+          (int)pattern->used_arguments.rotation, (int)pattern->used_arguments.duration,
+          (int)pattern->last_post_arguments.pulses);
+    }
+  }
+
   bool debug_enable_output_parameter_input = false;
 
   char serial_input_buffer[256];
@@ -54,6 +86,8 @@ volatile uint32_t pulse_1_transitions;
         if (strcmp(serial_input_buffer, "transitions")==0) {
           Serial.printf("pulse_0_transitions: %lu\n", pulse_0_transitions);
           Serial.printf("pulse_1_transitions: %lu\n", pulse_1_transitions);
+        } else if (strcmp(serial_input_buffer, "state")==0) {
+          print_sequencer_state();
         } else if (strcmp(serial_input_buffer, "clock-internal")==0) {
           Serial.println(F("Clock internal command received"));
           change_clock_mode(ClockMode::CLOCK_INTERNAL);
@@ -74,29 +108,67 @@ volatile uint32_t pulse_1_transitions;
           clock_stop();
         } else if (strcmp(serial_input_buffer, "help")==0) {
           Serial.println(F("Available commands:"));
+          Serial.println(F("Parameter debug commands:"));
           Serial.println(F("  I            - stream parameter input info to console"));
           Serial.println(F("  d i <index>  - toggle debug on a parameter input"));
+
+          Serial.println(F("Sample player commands:"));
           Serial.println(F("  s            - toggle sample interpolation on/off"));
           Serial.println(F("  c            - toggle calculate mode between main loop and audio worker"));
           Serial.println(F("  v            - toggle volume on/off"));
-          Serial.println(F("  V            - dump version/build information"));
+
+          Serial.println(F("Seqlib commands:"));
+          Serial.println(F("  f            - toggle fills on/off"));
+          Serial.println(F("  state        - dump controls, clock, pattern and held-note state"));
+
+          Serial.println(F("Kit bank commands:"));
+          Serial.println(F("  b            - print bank detection status"));
+          Serial.println(F("  B <slot>     - switch to bank slot <slot>"));
+          Serial.println(F("  l            - list track patterns and assigned voice samples"));
+          Serial.println(F("  lx           - list track patterns and assigned voice samples (extended)"));
+          Serial.println(F("  p <pattern>  - trigger named pattern"));
+          Serial.println(F("  X            - send sysex config to host"));
+          Serial.println(F("  y            - dump saveloadlib settings tree"));
+          Serial.println(F("  Y            - dump sample store status"));
+          
+          Serial.println(F("Clock commands:"));
+          Serial.println(F("  play         - start the clock"));
+          Serial.println(F("  stop         - stop the clock"));
           Serial.println(F("  clock-internal       - set clock mode to internal"));
           Serial.println(F("  clock-external-cv    - set clock mode to external CV"));
           Serial.println(F("  clock-external-usb   - set clock mode to external USB host"));
-          Serial.println(F("  play         - start the clock"));
-          Serial.println(F("  stop         - stop the clock"));
+          
+          Serial.println(F("  V            - dump version/build information"));
           Serial.println(F("  help         - show this help message"));
         } else if (serial_input_buffer[0]=='l') {
           // list the track names
           Serial.println("l command received!"); Serial.flush();
+          bool extended = serial_input_buffer[1] == 'x';
+          if (extended) Serial.println(F("Extended listing enabled"));
           for (int i = 0 ; i < sequencer->get_number_patterns() ; i++) {
             //Serial.printf("Pattern %i/%i\n", i+1, sequencer->number_patterns); Serial.flush();
             SimplePattern *p = (SimplePattern *)sequencer->get_pattern(i);
-            Serial.printf("Pattern [%i/%i]:\t%s\n", i+1, sequencer->get_number_patterns(), p->get_output_label()); Serial.flush();
+           if (Serial) { Serial.printf("Pattern [%i/%i]:\t%s\n", i+1, sequencer->get_number_patterns(), p->get_output_label()); Serial.flush(); }
           }
           for (int i = 0 ; i < NUM_VOICES ; i++) {
-            Serial.printf("Voice [%i/%i]:\t%s on %i (%s)\n", i+1, NUM_VOICES, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
-            Serial.flush();
+            if (Serial) Serial.printf("Voice [%i/%i]:\t%s on %i (%s)\n", i+1, NUM_VOICES, sample[voice[i].sample].sname, sample[voice[i].sample].MIDINOTE, get_note_name_c(sample[voice[i].sample].MIDINOTE, GM_CHANNEL_DRUMS));
+            if (extended) {
+              const int sample_number = voice[i].sample;
+              const bool has_data = sample_data && sample_data[sample_number];
+              if (Serial) Serial.printf("  data=%s size=%u volume=%u position=%lu\n",
+                  has_data ? "yes" : "no",
+                  has_data ? (unsigned)sample_data[sample_number]->size() : 0u,
+                  (unsigned)sample[sample_number].play_volume,
+                  (unsigned long)(voice[i].sampleindex >> 12));
+              }
+            if (Serial) Serial.flush();
+          }
+          if (extended) {
+              if (Serial) Serial.printf("Audio: bank=%d mode=%d callbacks=%lu buffers=%lu read=%d write=%d index=%u pitch=%d volume=%s\n",
+              bankManager.active_bank(), (int)sw.calculate_mode,
+              (unsigned long)sw.audio_callback_count, (unsigned long)sw.audio_buffer_count,
+              (int)sw.read_buffer_id, (int)sw.write_buffer_id, (unsigned)sw.bufferIndex,
+              (int)sw.global_pitch, sw.enable_volume ? "on" : "off");
           }
         } else if (serial_input_buffer[0]=='p') {  // trigger named pattern
           Serial.println(F("p command received!"));
@@ -177,13 +249,13 @@ volatile uint32_t pulse_1_transitions;
               FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
           Serial.printf("  slot 0: compiled-in  valid=%s  voices=%d\n",
               bankManager.is_bank_valid(0) ? "yes" : "no", NUM_VOICES);
-#ifdef ENABLE_LITTLEFS
-          for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
-              bankManager.debug_print_bank_detail(slot);
-          }
-#else
-          Serial.println("  (bank config files unavailable - ENABLE_LITTLEFS not defined in this build)");
-#endif
+          #ifdef ENABLE_LITTLEFS
+              for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
+                  bankManager.debug_print_bank_detail(slot);
+              }
+          #else
+                    Serial.println("  (bank config files unavailable - ENABLE_LITTLEFS not defined in this build)");
+          #endif
           Serial.printf("---\n");
 
         } else if (serial_input_buffer[0]=='B') {
@@ -216,19 +288,21 @@ volatile uint32_t pulse_1_transitions;
           Serial.printf("SampleStore: valid=%s  entries=%u  region=0x%08X+0x%08X\n",
               sampleStore.is_valid() ? "yes" : "no",
               sampleStore.num_entries(),
-              FLASH_SAMPLESTORE_ADDR, FLASH_SAMPLESTORE_SIZE);
+              FLASH_SAMPLESTORE_ADDR, FLASH_SAMPLESTORE_SIZE
+          );
           for (uint32_t i = 0; i < sampleStore.num_entries(); i++) {
               const SampleStoreEntryHeader *e = sampleStore.entry_at(i);
               if (!e) continue;
               Serial.printf("  [%3u] hash=0x%08X  %5u Hz  %ub x %u  '%.*s'\n",
                   i, e->content_hash, e->sample_rate, e->bit_depth, e->num_samples,
-                  24, e->name);
+                  24, e->name
+              );
           }
-        } else if (serial_input_buffer[0]=='Z') {
-          // set the debug_step_offset to a new value
-          int new_offset = atoi(&serial_input_buffer[2]);
-          debug_step_offset = new_offset;
-          Serial.printf("debug_step_offset set to %d (%d)\n", debug_step_offset, new_offset);
+        // } else if (serial_input_buffer[0]=='Z') {
+        //   // set the debug_step_offset to a new value
+        //   int new_offset = atoi(&serial_input_buffer[2]);
+        //   debug_step_offset = new_offset;
+        //   Serial.printf("debug_step_offset set to %d (%d)\n", debug_step_offset, new_offset);
         } else if (serial_input_buffer[0]=='?') {
           Serial.println(
             "Commands: "

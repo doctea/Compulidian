@@ -100,6 +100,7 @@ public:
 
 	/// Read switch position
 	Switch __not_in_flash_func(SwitchVal)() {return switchVal;}
+	bool SwitchReady() const {return switchInitialized;}
 
 //protected:
 	/// Read switch position
@@ -317,7 +318,8 @@ private:
 	volatile bool connected[6] = {0,0,0,0,0,0};
 	bool useNormProbe;
 
-	Switch switchVal, lastSwitchVal;
+	Switch switchVal = Middle, lastSwitchVal = Middle;
+	volatile bool switchInitialized = false;
 	
 	volatile uint8_t runADCMode;
 

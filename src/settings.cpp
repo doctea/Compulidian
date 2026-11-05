@@ -65,6 +65,8 @@ static void ensure_settings_root() {
 Settings settings_load() {
     ensure_settings_root();
     sl_load_from_file(LIVE_SETTINGS_SAVE_PATH, SL_SCOPE_SYSTEM);
+    if (g_settings_storage.momentary_role > MOMENTARY_BANK)
+        g_settings_storage.momentary_role = MOMENTARY_MUTE;
     return g_settings_storage;
 }
 
@@ -88,6 +90,7 @@ Settings settings_load() {
     if (flash_s->magic == SETTINGS_MAGIC && flash_s->version == SETTINGS_VERSION) {
         Settings s;
         memcpy(&s, flash_s, sizeof(Settings));
+        if (s.momentary_role > MOMENTARY_BANK) s.momentary_role = MOMENTARY_MUTE;
         return s;
     }
 
