@@ -18,8 +18,8 @@
 
 extern int debug_step_offset;
 
-volatile uint32_t pulse_0_transitions;
-volatile uint32_t pulse_1_transitions;
+volatile uint32_t pulse_0_transitions = 0;
+volatile uint32_t pulse_1_transitions = 0;
 
 #ifdef USE_TINYUSB
 
@@ -91,12 +91,11 @@ volatile uint32_t pulse_1_transitions;
         } else if (strcmp(serial_input_buffer, "clock-internal")==0) {
           Serial.println(F("Clock internal command received"));
           change_clock_mode(ClockMode::CLOCK_INTERNAL);
-        #ifdef ENABLE_CLOCK_INPUT_CV
-          } else if (strcmp(serial_input_buffer, "clock-external-cv")==0) {
-            Serial.println(F("Clock external command received"));
-            change_clock_mode(ClockMode::CLOCK_EXTERNAL_CV);
-          }
-        #endif
+          #ifdef ENABLE_CLOCK_INPUT_CV
+            } else if (strcmp(serial_input_buffer, "clock-external-cv")==0) {
+              Serial.println(F("Clock external command received"));
+              change_clock_mode(ClockMode::CLOCK_EXTERNAL_CV);
+          #endif
         } else if (strcmp(serial_input_buffer, "clock-external-usb")==0) {
           Serial.println(F("Clock external USB command received"));
           change_clock_mode(ClockMode::CLOCK_EXTERNAL_USB_HOST);
@@ -135,11 +134,18 @@ volatile uint32_t pulse_1_transitions;
           Serial.println(F("  play         - start the clock"));
           Serial.println(F("  stop         - stop the clock"));
           Serial.println(F("  clock-internal       - set clock mode to internal"));
-          Serial.println(F("  clock-external-cv    - set clock mode to external CV"));
+          #ifdef ENABLE_CLOCK_INPUT_CV
+            Serial.println(F("  clock-external-cv    - set clock mode to external CV"));
+            Serial.println(F("  transitions       - (debug) show pulse input transitions"));
+          #endif
           Serial.println(F("  clock-external-usb   - set clock mode to external USB host"));
           
           Serial.println(F("  V            - dump version/build information"));
           Serial.println(F("  help         - show this help message"));
+
+          Serial.println();
+          Serial.printf("Clock mode: %s\n", get_clock_mode_string(clock_mode));
+          
         } else if (serial_input_buffer[0]=='l') {
           // list the track names
           Serial.println("l command received!"); Serial.flush();
