@@ -210,19 +210,22 @@ Open `http://localhost:8082/compulidian_manager.html`.
   Full storage replacement and MIDI diagnostics are secondary device tools.
 
 The Device tab shows the current fixed input routing. Configurable CV and
-knob routing is not implemented yet; stored routing fields are retained when
-saving the supported settings. Unsaved drafts survive reconnects within the
+knob routing is not implemented yet. Unsaved drafts survive reconnects within the
 open page, but are not an offline backup. Closing or reloading warns about
 unsaved work.
 
-### MIDI features
+Sequencer and clock options also in Settings tab (TODO: complete documentation)
+
+### Clock and MIDI features
 
 - If a MIDI start message is received over USB MIDI then the internal clock is disabled and playback will be slaved to the external USB MIDI clock instead.
+- If a pulse is received in Pulse In 1 then it will switch to external CV clock input.  Pulses on Pulse In 2 will drive the clock at the PPQN configured over the Web MIDI page.
 - If a USB MIDI host is connected then the drum patterns are sent back to the host on channel 10.
 
 ### Serial console commands
 
 - Connect via serial to access debug console.
+- type `help` to see the list of available commands
 - Press `enter` after entering one of these commands to do the appropriate action.
 - Backspace/delete etc don't currently work so don't make any typos!
 - Press `tab`+ `enter` to repeat the previous command.
@@ -239,29 +242,18 @@ unsaved work.
 
 ## Known problems
 
-- (IMPROVED by reducing samplerate) Seems like ADC reads are a bit wobbly when higher CPU used; reducing number of voices seems to improve stability
-- (WORKED AROUND by dropping samplerate) Having to overclock to 220mhz to get 16 voices to play within sample time.
-- Modulating shuffle seems to upset the clock timing, maybe?
-- Intermittent crashing when attempting to output to Serial
-- Receiving external MIDI clock seems to glitch/freeze/miss clocks for a few seconds after MIDI start is received
+- ADC reads can be a bit wobbly sometimes (mostly noticeable as pitch flucutations); massively alleviated with lower sample rates and overclocking the CPU
 
 ## Future plans
 
 - all the modulation possibilities need to be made to connect to sensible things;
-- make modulation/knob/parameter mapping configurable (maybe via WebUSB?)
-- slave to external CV clock and reset
-- option to send LFOs/envelopes out on CV, instead of using them as gates?
-- i also have some code for generating scale-quantised bassline patterns based on the generated euclidian patterns if that would be interesting to anyone
-  - or could maybe output a bassline on the second audio output
-- enable selection of initial seed so can choose many variations of the default pattern?  maybe use unique card serial number for this?
+- make modulation/knob/parameter mappings
+- option to send LFOs/envelopes on the CV outputs
+- could maybe output a bassline or some kind of pitched noise on the second audio output?
 - add more default patterns than four-on-floor that can be chosen somehow (eg breakbeat patterns)
+- allow multiple samples to be assigned to same midi note -> round robin / random
+- i also have some code for generating scale-quantised bassline patterns based on the generated euclidian patterns if that would be interesting to anyone
 
 open to collaboration and welcome feedback 🙂
 
-
-
 ----
-
-
-couple more ideas before i forget:-
-- allow multiple samples to be assigned to same midi note -> round robin / random
