@@ -26,6 +26,13 @@ Settings settings_defaults() {
     s.magic   = SETTINGS_MAGIC;
     s.version = SETTINGS_VERSION;
     s.active_bank = 0; // compiled-in bank
+    s.cv_clock_ppqn = 1;
+    s.extended_settings_version = 1;
+    s.cv_reset_required = 1;
+    s.cv_reset_song_position = 1;
+    s.fills_enabled = 1;
+    s.mutation_amount = 3;
+    s.reset_before_mutate = 1;
 
     // Default outputs: pulse1 and pulse2 as clock, cv1 and cv2 as audio.
     s.outputs[0] = { OUTPUT_TYPE_CLOCK, 1, 0, 0 };
@@ -67,6 +74,9 @@ Settings settings_load() {
     sl_load_from_file(LIVE_SETTINGS_SAVE_PATH, SL_SCOPE_SYSTEM);
     if (g_settings_storage.momentary_role > MOMENTARY_BANK)
         g_settings_storage.momentary_role = MOMENTARY_MUTE;
+    if (!settings_valid_cv_clock_ppqn(g_settings_storage.cv_clock_ppqn))
+        g_settings_storage.cv_clock_ppqn = 1;
+    settings_normalize_extended(g_settings_storage);
     return g_settings_storage;
 }
 
@@ -91,6 +101,8 @@ Settings settings_load() {
         Settings s;
         memcpy(&s, flash_s, sizeof(Settings));
         if (s.momentary_role > MOMENTARY_BANK) s.momentary_role = MOMENTARY_MUTE;
+        if (!settings_valid_cv_clock_ppqn(s.cv_clock_ppqn)) s.cv_clock_ppqn = 1;
+        settings_normalize_extended(s);
         return s;
     }
 

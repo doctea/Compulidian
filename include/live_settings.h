@@ -15,7 +15,7 @@
 // Path where the device-wide (SL_SCOPE_SYSTEM) settings file is persisted.
 #define LIVE_SETTINGS_SAVE_PATH "/save/settings.txt"
 
-class DeviceSettingsHost : public SHStorage<0, 24> {
+class DeviceSettingsHost : public SHStorage<0, 32> {
     Settings *target;
 
 public:
@@ -28,6 +28,14 @@ public:
 
         register_setting(new VarSetting<uint8_t>("active_bank", "DeviceSettings", &target->active_bank), SL_SCOPE_SYSTEM);
         register_setting(new VarSetting<MomentaryRole>("momentary_role", "DeviceSettings", &target->momentary_role), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("cv_clock_ppqn", "DeviceSettings", &target->cv_clock_ppqn), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("clock_options_ver", "DeviceSettings", &target->extended_settings_version), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("cv_reset_required", "DeviceSettings", &target->cv_reset_required), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("cv_reset_song", "DeviceSettings", &target->cv_reset_song_position), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("fills_enabled", "DeviceSettings", &target->fills_enabled), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("mutation_amount", "DeviceSettings", &target->mutation_amount), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("reset_mutation", "DeviceSettings", &target->reset_before_mutate), SL_SCOPE_SYSTEM);
+        register_setting(new VarSetting<uint8_t>("seed_card_id", "DeviceSettings", &target->add_card_id_to_seed), SL_SCOPE_SYSTEM);
 
         for (int i = 0; i < 4; i++) {
             char lbl[24];

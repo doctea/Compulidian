@@ -81,6 +81,15 @@
   dialog h2 { font-size: 1.1rem; margin-bottom: 1rem; }
   dialog .row:last-child { justify-content: flex-end; margin-bottom: 0; }
   .playing-slot { background: #365a45 !important; }
+  label.toggle { display: flex; align-items: center; gap: .5rem; color: var(--text); font-size: .85rem; max-width: 100%; }
+  label.toggle input { flex-shrink: 0; }
+  .clock-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+  .clock-metrics div { min-width: 0; border-bottom: 1px solid var(--border); padding-bottom: .65rem; }
+  .clock-metrics dt { color: var(--muted); font-size: .8rem; margin-bottom: .35rem; }
+  .clock-metrics dd { font-variant-numeric: tabular-nums; font-size: .95rem; min-height: 1.3em; overflow-wrap: anywhere; }
+  .clock-edge { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--border); margin-right: .4rem; }
+  .clock-edge.active { background: var(--ok); box-shadow: 0 0 0 3px #22c55e22; }
+  #clock-warning { color: var(--danger); min-height: 1.5em; margin-bottom: .75rem; font-size: .85rem; }
   @media (max-width: 600px) {
     h1 { padding: .8rem 1rem; flex-wrap: wrap; }
     .tab { padding: 1rem; }
@@ -133,6 +142,7 @@
   <button class="active" onclick="switchTab('bank', this)">Banks</button>
   <button onclick="switchTab('samples', this)">Samples</button>
   <button onclick="switchTab('other', this)">Settings</button>
+  <button onclick="switchTab('clock', this)">Clock</button>
   <button onclick="switchTab('io', this)">Device</button>
 </nav>
 
@@ -327,8 +337,64 @@
         <option value="1">Select bank</option>
       </select>
     </div>
+    <div class="col">
+      <label for="cfg-cv-clock-ppqn">CV clock input (Pulse 2)</label>
+      <select id="cfg-cv-clock-ppqn" disabled onchange="applyConfigLive()">
+        <option value="1">1 PPQN</option>
+        <option value="2">2 PPQN</option>
+        <option value="4">4 PPQN</option>
+        <option value="8">8 PPQN</option>
+        <option value="12">12 PPQN</option>
+        <option value="16">16 PPQN</option>
+        <option value="24">24 PPQN</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <label class="toggle"><input id="cfg-reset-required" type="checkbox" checked disabled onchange="applyConfigLive()"> RESET required to enter CV clock mode</label>
+    <label class="toggle"><input id="cfg-reset-song" type="checkbox" checked disabled onchange="applyConfigLive()"> RESET also rewinds song position / seed</label>
+  </div>
+  <div class="section-title">Euclidean</div>
+  <div class="row">
+    <label class="toggle"><input id="cfg-fills" type="checkbox" checked disabled onchange="applyConfigLive()"> Fills enabled</label>
+    <div class="col">
+      <label for="cfg-mutation-amount">Mutation amount</label>
+      <input id="cfg-mutation-amount" type="number" min="0" max="8" step="1" value="3" disabled onchange="applyConfigLive()">
+    </div>
+    <label class="toggle"><input id="cfg-reset-mutation" type="checkbox" checked disabled onchange="applyConfigLive()"> Reset before mutation</label>
+    <label class="toggle"><input id="cfg-seed-card-id" type="checkbox" disabled onchange="applyConfigLive()"> Add Card ID to seed</label>
   </div>
 </div><!-- /tab-other -->
+
+<div id="tab-clock" class="tab">
+  <div class="toolbar">
+    <span id="clock-connection" class="state-line" role="status">Not connected.</span>
+    <span class="spacer"></span>
+    <button class="btn" id="clock-record" disabled onclick="toggleClockRecording()" title="Record clock trace"><i data-lucide="circle" aria-hidden="true"></i><span id="clock-record-label">Record trace</span></button>
+    <button class="btn" id="clock-download" disabled onclick="downloadClockTrace()" title="Download clock trace" aria-label="Download clock trace"><i data-lucide="download" aria-hidden="true"></i></button>
+    <button class="btn" id="clock-clear" disabled onclick="clearClockTrace()" title="Clear clock trace" aria-label="Clear clock trace"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+    <span id="clock-record-count" class="state-line">0 samples</span>
+  </div>
+  <div id="clock-warning" role="status"></div>
+  <dl class="clock-metrics">
+    <div><dt>Set BPM</dt><dd id="clock-set-bpm">--</dd></div>
+    <div><dt>Engine BPM</dt><dd id="clock-engine-bpm">--</dd></div>
+    <div><dt>CV detected BPM</dt><dd id="clock-detected-bpm">--</dd></div>
+    <div><dt>Source / active PPQN</dt><dd id="clock-source">--</dd></div>
+    <div><dt>Transport / strict mode</dt><dd id="clock-state">--</dd></div>
+    <div><dt>CV pulses observed</dt><dd><span id="clock-pulse-light" class="clock-edge"></span><span id="clock-pulses">--</span></dd></div>
+    <div><dt>CV resets observed</dt><dd><span id="clock-reset-light" class="clock-edge"></span><span id="clock-resets">--</span></dd></div>
+    <div><dt>Last pulse / reset age</dt><dd id="clock-ages">--</dd></div>
+    <div><dt>CV interval / min / max</dt><dd id="clock-interval">--</dd></div>
+    <div><dt>Queue lost / lag / max lag</dt><dd id="clock-queue">--</dd></div>
+    <div><dt>Active source pulses / rejected</dt><dd id="clock-accepted">--</dd></div>
+    <div><dt>Sync ticks delivered / expected</dt><dd id="clock-delivery">--</dd></div>
+    <div><dt>Strict pending ticks / stalled</dt><dd id="clock-strict">--</dd></div>
+    <div><dt>Accepted interval / pulse age</dt><dd id="clock-engine-timing">--</dd></div>
+    <div><dt>Engine reentry depth: internal / external</dt><dd id="clock-overlap">--</dd></div>
+    <div><dt>Tick / effective seed</dt><dd id="clock-position">--</dd></div>
+  </dl>
+</div>
 
 <script type="module" src="compulidian_manager.js"></script>
 </body>

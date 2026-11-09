@@ -43,6 +43,7 @@
 #include <SimplyAtomic.h>
 // #include <RP2040.h>
 #include "midi_usb/usb_midi_tx.h"
+#include "cv_clock_input.h"
 
 #include "configurator.h"
 
@@ -50,6 +51,7 @@ int debug_step_offset = 0;
 
 WorkshopOutputWrapper output_wrapper(&sw);
 DeviceControls device_controls;
+Settings current_settings;
 
 #ifdef USE_TINYUSB
   USBMIDITxQueue usb_midi_tx_queue;
@@ -140,7 +142,25 @@ void global_on_restart() {
 #endif
 
 #ifdef ENABLE_CLOCK_INPUT_CV
-  bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us);
+  static void process_cv_clock_event(bool reset, uint32_t observed_at_us) {
+    if (reset) {
+      const uint32_t position = current_settings.cv_reset_song_position ? 0
+          : ((ticks + 1) / TICKS_PER_PHRASE) * TICKS_PER_PHRASE;
+      ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+        if (clock_mode != CLOCK_EXTERNAL_CV) change_clock_mode(CLOCK_EXTERNAL_CV);
+        sequencer->release_outputs();
+        if (!playing) clock_start();
+        clock_reset_to_position(position);
+        waiting_for_external_clock = true;
+        last_processed_tick = -1;
+        output_processing_pending = false;
+      }
+    } else {
+      if (!current_settings.cv_reset_required && clock_mode != CLOCK_EXTERNAL_CV)
+        change_clock_mode(CLOCK_EXTERNAL_CV);
+      clock_receive_external_pulse_at(CLOCK_EXTERNAL_CV, observed_at_us);
+    }
+  }
 #endif
 
 void setup_usb();
@@ -180,6 +200,9 @@ void setup() {
 
   setup_samples();
   current_settings = settings_load(); // load after bankManager.setup() inside setup_samples()
+  #if defined(USE_UCLOCK) && defined(ENABLE_CLOCK_INPUT_CV)
+    set_external_cv_clock_ppqn(current_settings.cv_clock_ppqn);
+  #endif
 
   // Register SysEx handler for web config tool
   USBMIDI.setHandleSystemExclusive(handle_sysex);
@@ -208,6 +231,7 @@ void setup() {
     output_processor->configure_sequencer(sequencer);
     ((EuclidianSequencer*)sequencer)->initialise_patterns();
     ((EuclidianSequencer*)sequencer)->reset_patterns();
+    apply_sequencer_settings();
     uClock.setOnOutputPPQNEnd(process_pending_outputs);
   #endif
 
@@ -352,17 +376,7 @@ void __not_in_flash_func(loop)() {
     bool cv_event_is_reset;
     uint32_t cv_event_observed_at_us;
     while (take_cv_clock_event(cv_event_is_reset, cv_event_observed_at_us)) {
-      // Serial.print(F("CV event observed at us: "));
-      // Serial.print(cv_event_observed_at_us);
-      // Serial.print(F(", is reset: "));
-      // Serial.println(cv_event_is_reset);
-      if (cv_event_is_reset) {
-        if (clock_mode != CLOCK_EXTERNAL_CV)
-          change_clock_mode(CLOCK_EXTERNAL_CV);
-        clock_receive_external_reset(CLOCK_EXTERNAL_CV);
-      } else {
-        clock_receive_external_pulse_at(CLOCK_EXTERNAL_CV, cv_event_observed_at_us);
-      }
+      process_cv_clock_event(cv_event_is_reset, cv_event_observed_at_us);
     }
   #endif
 
@@ -372,6 +386,7 @@ void __not_in_flash_func(loop)() {
   }
 
   if (ticked) {
+    // Output a clock pulse on AudioOut2
     if (is_bpm_on_sixteenth(ticks)) {
       sw.AudioOut2(32767);
     } else if (is_bpm_on_thirtysecond(ticks)) {

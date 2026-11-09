@@ -50,11 +50,19 @@ struct OutputConfig {
 //   4   version         4 B
 //   8   active_bank     1 B
 //   9   momentary_role  1 B
-//  10   reserved        2 B
+//  10   cv_clock_ppqn   1 B
+//  11   reserved        1 B
 //  12   outputs[4]     16 B   (4 × OutputConfig)
 //  28   cv_input_role   2 B
 //  30   knob_role       3 B
-//  33   _pad          223 B
+//  33   extended_settings_version 1 B
+//  34   cv_reset_required         1 B
+//  35   cv_reset_song_position    1 B
+//  36   fills_enabled             1 B
+//  37   mutation_amount           1 B
+//  38   reset_before_mutate       1 B
+//  39   add_card_id_to_seed       1 B
+//  40   _pad                    216 B
 // 256   (end)
 // ---------------------------------------------------------------------------
 struct Settings {
@@ -62,13 +70,21 @@ struct Settings {
     uint32_t    version;            // SETTINGS_VERSION
     uint8_t     active_bank;        // 0 = compiled-in bank, 1-4 = flash bank slot
     MomentaryRole momentary_role;
-    uint8_t     reserved[2];        // must be 0
+    uint8_t     cv_clock_ppqn;
+    uint8_t     reserved[1];        // must be 0
     OutputConfig outputs[4];        // pulse1, pulse2, cv1, cv2
     InputRole   cv_input_role[2];   // role of CV1 and CV2 inputs
     InputRole   knob_role[3];       // role of Main, X, Y knobs
+    uint8_t     extended_settings_version;
+    uint8_t     cv_reset_required;
+    uint8_t     cv_reset_song_position;
+    uint8_t     fills_enabled;
+    uint8_t     mutation_amount;
+    uint8_t     reset_before_mutate;
+    uint8_t     add_card_id_to_seed;
     uint8_t     _pad[SETTINGS_STORED_SIZE - 4 - 4 - 1 - 3
                      - 4 * 4   // outputs[4], sizeof(OutputConfig)==4
-                     - 2 - 3]; // cv_input_role + knob_role
+                     - 2 - 3 - 7];
 };
 
 #ifdef __cplusplus
@@ -84,6 +100,23 @@ static_assert(sizeof(OutputConfig) == 4,
 
 // Returns a Settings struct with all fields at their defaults.
 Settings settings_defaults();
+
+inline bool settings_valid_cv_clock_ppqn(uint8_t ppqn) {
+    return ppqn == 1 || ppqn == 2 || ppqn == 4
+    || ppqn == 8 || ppqn == 12 || ppqn == 16 || ppqn == 24;
+}
+
+inline void settings_normalize_extended(Settings &settings) {
+    const Settings defaults = settings_defaults();
+    const bool legacy = settings.extended_settings_version != 1;
+    if (legacy || settings.cv_reset_required > 1) settings.cv_reset_required = defaults.cv_reset_required;
+    if (legacy || settings.cv_reset_song_position > 1) settings.cv_reset_song_position = defaults.cv_reset_song_position;
+    if (legacy || settings.fills_enabled > 1) settings.fills_enabled = defaults.fills_enabled;
+    if (legacy || settings.mutation_amount > 8) settings.mutation_amount = defaults.mutation_amount;
+    if (legacy || settings.reset_before_mutate > 1) settings.reset_before_mutate = defaults.reset_before_mutate;
+    if (legacy || settings.add_card_id_to_seed > 1) settings.add_card_id_to_seed = defaults.add_card_id_to_seed;
+    settings.extended_settings_version = 1;
+}
 
 // Reads Settings from flash.  Returns defaults if the magic/version is wrong.
 Settings settings_load();

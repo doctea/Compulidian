@@ -11,6 +11,9 @@
 #include "audio/sample_store.h"
 #include "settings.h"
 #include "configurator.h"
+#include <ctype.h>
+#include <errno.h>
+#include <stdlib.h>
 
 #ifdef ENABLE_LITTLEFS
   #include "live_settings.h"
@@ -22,6 +25,50 @@ volatile uint32_t pulse_0_transitions = 0;
 volatile uint32_t pulse_1_transitions = 0;
 
 #ifdef USE_TINYUSB
+
+  #ifdef ENABLE_CLOCK_INPUT_CV
+    static bool set_cv_clock_ppqn_from_serial(const char *command) {
+      const char prefix[] = "clock-external-cv-ppqn";
+      if (strncmp(command, prefix, sizeof(prefix) - 1) != 0 || command[sizeof(prefix) - 1] != ' ') return false;
+      const char *start = command + sizeof(prefix);
+      while (isspace((unsigned char)*start)) ++start;
+      if (!isdigit((unsigned char)*start)) return false;
+      char *end;
+      errno = 0;
+      const unsigned long value = strtoul(start, &end, 10);
+      while (isspace((unsigned char)*end)) ++end;
+      if (errno == ERANGE || *end != '\0' || value > 24 || !settings_valid_cv_clock_ppqn((uint8_t)value)) return false;
+      if (!set_external_cv_clock_ppqn((uint16_t)value)) return false;
+      current_settings.cv_clock_ppqn = (uint8_t)value;
+      return true;
+    }
+  #endif
+
+  static void print_clock_state() {
+    const auto clock = get_external_clock_diagnostics();
+    Serial.printf("Clock: set_bpm=%.3f playing=%u mode=%d ppqn=%u waiting=%u ticks=%lu pulses=%lu rejected=%lu delivered=%lu expected=%lu adapter_overflow=%lu\n",
+        get_bpm(), (unsigned)playing, (int)clock_mode, (unsigned)clock.input_ppqn,
+        (unsigned)waiting_for_external_clock, (unsigned long)ticks,
+        (unsigned long)clock.received_pulses, (unsigned long)clock.rejected_pulses,
+        (unsigned long)clock.delivered_sync_ticks, (unsigned long)clock.expected_sync_ticks,
+        (unsigned long)clock.adapter_overflow);
+    #ifdef USE_UCLOCK
+      Serial.printf("Engine: bpm=%.3f state=%u strict=%u stalled=%u pending=%u accepted_interval_us=%lu pulse_age_us=%lu\n",
+          uClock.getTempo(), (unsigned)uClock.clock_state, (unsigned)uClock.isStrictExternalMode(),
+          (unsigned)uClock.isExternalClockStalled(), (unsigned)uClock.getExternalTicksRemaining(),
+          (unsigned long)uClock.getLastAcceptedExternalInterval(), (unsigned long)uClock.getExternalClockPulseAge());
+    #endif
+    #ifdef ENABLE_CLOCK_INPUT_CV
+      const auto input = get_cv_clock_input_diagnostics();
+      const double detected = input.interval_us && current_settings.cv_clock_ppqn
+          ? 60000000.0 / input.interval_us / current_settings.cv_clock_ppqn : 0;
+      Serial.printf("CV: ppqn=%u detected_bpm=%.3f reset_required=%u reset_song=%u pulses=%lu resets=%lu lost=%lu interval_us=%lu min_us=%lu max_us=%lu lag_us=%lu max_lag_us=%lu\n",
+          (unsigned)current_settings.cv_clock_ppqn, detected, (unsigned)current_settings.cv_reset_required,
+          (unsigned)current_settings.cv_reset_song_position, (unsigned long)input.pulses, (unsigned long)input.resets,
+          (unsigned long)input.overflow, (unsigned long)input.interval_us, (unsigned long)input.min_interval_us,
+          (unsigned long)input.max_interval_us, (unsigned long)input.queue_lag_us, (unsigned long)input.max_queue_lag_us);
+    #endif
+  }
 
   static void print_sequencer_state() {
     Serial.printf("State: ticks=%lu ready=%u knobs=%ld,%ld,%ld cv=%ld,%ld audio=%ld,%ld\n",
@@ -88,13 +135,27 @@ volatile uint32_t pulse_1_transitions = 0;
           Serial.printf("pulse_1_transitions: %lu\n", pulse_1_transitions);
         } else if (strcmp(serial_input_buffer, "state")==0) {
           print_sequencer_state();
+        } else if (strcmp(serial_input_buffer, "clock-state")==0) {
+          print_clock_state();
         } else if (strcmp(serial_input_buffer, "clock-internal")==0) {
           Serial.println(F("Clock internal command received"));
           change_clock_mode(ClockMode::CLOCK_INTERNAL);
+        } else if (strcmp(serial_input_buffer, "clock-external-cv")==0) {
           #ifdef ENABLE_CLOCK_INPUT_CV
-            } else if (strcmp(serial_input_buffer, "clock-external-cv")==0) {
               Serial.println(F("Clock external command received"));
               change_clock_mode(ClockMode::CLOCK_EXTERNAL_CV);
+          #else
+              Serial.println(F("CV clock input is not enabled in this firmware"));
+          #endif
+        } else if (strncmp(serial_input_buffer, "clock-external-cv-ppqn", 22)==0) {
+          #ifdef ENABLE_CLOCK_INPUT_CV
+              if (set_cv_clock_ppqn_from_serial(serial_input_buffer)) {
+                Serial.printf("External CV PPQN set to %u (live, not saved)\n", (unsigned)current_settings.cv_clock_ppqn);
+              } else {
+                Serial.println(F("Usage: clock-external-cv-ppqn <1|2|4|8|12|16|24>"));
+              }
+          #else
+              Serial.println(F("CV clock input is not enabled in this firmware"));
           #endif
         } else if (strcmp(serial_input_buffer, "clock-external-usb")==0) {
           Serial.println(F("Clock external USB command received"));
@@ -119,6 +180,7 @@ volatile uint32_t pulse_1_transitions = 0;
           Serial.println(F("Seqlib commands:"));
           Serial.println(F("  f            - toggle fills on/off"));
           Serial.println(F("  state        - dump controls, clock, pattern and held-note state"));
+          Serial.println(F("  clock-state  - dump BPM, pulse/reset counts, queue losses and strict clock state"));
 
           Serial.println(F("Kit bank commands:"));
           Serial.println(F("  b            - print bank detection status"));
@@ -136,6 +198,7 @@ volatile uint32_t pulse_1_transitions = 0;
           Serial.println(F("  clock-internal       - set clock mode to internal"));
           #ifdef ENABLE_CLOCK_INPUT_CV
             Serial.println(F("  clock-external-cv    - set clock mode to external CV"));
+            Serial.printf("  clock-external-cv-ppqn <1|2|4|8|12|16|24> - set live CV PPQN (currently %u)\n", external_cv_ppqn);
             Serial.println(F("  transitions       - (debug) show pulse input transitions"));
           #endif
           Serial.println(F("  clock-external-usb   - set clock mode to external USB host"));
@@ -190,6 +253,7 @@ volatile uint32_t pulse_1_transitions = 0;
         } else if (serial_input_buffer[0]=='f') {   // toggle fills_enabled
           if (Serial) Serial.printf("f command received - fills_enabled was %s!\n", ((EuclidianSequencer*)sequencer)->is_fills_enabled() ? "true" : "false");
           ((EuclidianSequencer*)sequencer)->set_fills_enabled(!((EuclidianSequencer*)sequencer)->is_fills_enabled());
+          current_settings.fills_enabled = ((EuclidianSequencer*)sequencer)->is_fills_enabled();
           if (Serial) Serial.printf("f command received - fills_enabled is now %s!\n", ((EuclidianSequencer*)sequencer)->is_fills_enabled() ? "true" : "false");
         } else if (serial_input_buffer[0]=='I') {   // toggle debug on/off for output parameter inputs
           Serial.println(F("I command received!"));

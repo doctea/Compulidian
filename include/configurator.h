@@ -3,6 +3,8 @@
 #include <Arduino.h>
 
 #include "settings.h"
+#include "cv_clock_input.h"
+#include "clock.h"
 #include "audio/flash_layout.h"
 #include "audio/bank_manager.h"
 #include "audio/bank_config.h"
@@ -38,6 +40,7 @@
 #define SYSEX_TYPE_GET_SAMPLE_META_INFO_REQ  0x18
 #define SYSEX_TYPE_GET_SAMPLE_META_CHUNK_REQ 0x19
 #define SYSEX_TYPE_SET_SAMPLE_META_CHUNK_REQ 0x1A
+#define SYSEX_TYPE_GET_CLOCK_STATUS_REQ 0x1B
 #define SYSEX_TYPE_REBOOT_REQ     0x20
 
 #define SYSEX_TYPE_CONFIG_RESP    0x30
@@ -48,6 +51,9 @@
 #define SYSEX_TYPE_SAMPLES_CHUNK_RESP 0x44
 #define SYSEX_TYPE_SAMPLE_META_INFO_RESP  0x45
 #define SYSEX_TYPE_SAMPLE_META_CHUNK_RESP 0x46
+#define SYSEX_TYPE_CLOCK_STATUS_RESP 0x47
+#define SYSEX_CLOCK_STATUS_HEADER_BYTES 15
+#define SYSEX_CLOCK_STATUS_FIELDS 25
 #define SYSEX_TYPE_ACK            0x31
 #define SYSEX_TYPE_NACK           0x32
 
@@ -85,7 +91,10 @@
 #define SYSEX_DATA_LEN    19
 #define SYSEX_BANK_NAME   32   // bytes per bank name in the SysEx response
 #define SYSEX_CONFIG_ROLE_OFFSET (SYSEX_DATA_LEN + FLASH_MAX_BANKS * SYSEX_BANK_NAME)
-#define SYSEX_CONFIG_PAYLOAD_LEN (SYSEX_CONFIG_ROLE_OFFSET + 1)
+#define SYSEX_CONFIG_CV_PPQN_OFFSET (SYSEX_CONFIG_ROLE_OFFSET + 1)
+#define SYSEX_CONFIG_CV_CLOCK_OFFSET (SYSEX_CONFIG_CV_PPQN_OFFSET + 1)
+#define SYSEX_CONFIG_OPTIONS_OFFSET (SYSEX_CONFIG_CV_CLOCK_OFFSET + 1)
+#define SYSEX_CONFIG_PAYLOAD_LEN (SYSEX_CONFIG_OPTIONS_OFFSET + 6)
 // Raw chunk size must fit in 14 bits (encoded as two 7-bit bytes) - see send_bank_chunk_sysex().
 // Kept moderate (vs. e.g. 1024+) to bound stack usage of the payload buffers below.
 // This is the DOWNLOAD (device -> browser) direction only - send_sysex_frame()'s
@@ -135,7 +144,7 @@
 #define SYSEX_META_WRITE_RAW_CHUNK_BYTES   32
 #define SYSEX_META_WRITE_MAX_BYTES         8192
 
-static Settings current_settings;
+extern Settings current_settings;
 
 enum PendingSysexAction : uint8_t {
     PENDING_NONE = 0,
@@ -150,6 +159,7 @@ enum PendingSysexAction : uint8_t {
     PENDING_SEND_SAMPLES_CHUNK = 9,
     PENDING_SEND_SAMPLE_META_INFO = 10,
     PENDING_SEND_SAMPLE_META_CHUNK = 11,
+    PENDING_SEND_CLOCK_STATUS = 12,
 };
 
 struct PendingSysexItem {
@@ -165,6 +175,7 @@ static volatile uint8_t pending_sysex_tail = 0;
 static PendingSysexItem pending_sysex_queue[8];
 
 static void send_config_sysex(uint8_t req_id = 0);
+static void send_clock_status_sysex(uint8_t req_id);
 static void send_bank_info_sysex(uint8_t req_id, uint8_t slot);
 static void send_bank_chunk_sysex(uint8_t req_id, uint8_t slot, uint16_t chunk_idx);
 static void send_slots_info_sysex(uint8_t req_id);
@@ -306,6 +317,9 @@ static void process_pending_sysex_responses() {
         switch (item.action) {
             case PENDING_SEND_CONFIG:
                 send_config_sysex(item.req_id);
+                break;
+            case PENDING_SEND_CLOCK_STATUS:
+                send_clock_status_sysex(item.req_id);
                 break;
             case PENDING_SEND_ACK:
                 send_ack(item.req_id);
@@ -777,13 +791,108 @@ static void send_samples_chunk_sysex(uint8_t req_id, uint16_t chunk_idx) {
     send_sysex_frame(SYSEX_TYPE_SAMPLES_CHUNK_RESP, req_id, SYSEX_STATUS_OK, payload, (uint16_t)(SYSEX_SAMPLES_CHUNK_HEADER_BYTES + raw_len * 2));
 }
 
+static uint16_t build_clock_status_payload(uint8_t *payload) {
+    memset(payload, 0, SYSEX_CLOCK_STATUS_HEADER_BYTES + SYSEX_CLOCK_STATUS_FIELDS * 5);
+    payload[0] = 1;
+    payload[2] = clock_mode == CLOCK_INTERNAL ? 0 : clock_mode == CLOCK_EXTERNAL_USB_HOST ? 1 : 3;
+    CvClockInputDiagnostics input;
+    #ifdef ENABLE_CLOCK_INPUT_CV
+        payload[1] = 1;
+        if (clock_mode == CLOCK_EXTERNAL_CV) payload[2] = 2;
+        input = get_cv_clock_input_diagnostics();
+    #endif
+    payload[3] = playing;
+    payload[4] = waiting_for_external_clock;
+    payload[8] = current_settings.cv_clock_ppqn;
+    payload[9] = current_settings.cv_reset_required;
+    payload[10] = current_settings.cv_reset_song_position;
+    payload[11] = current_settings.fills_enabled;
+    payload[12] = current_settings.mutation_amount;
+    payload[13] = current_settings.reset_before_mutate;
+    payload[14] = current_settings.add_card_id_to_seed;
+    const uint32_t now = micros();
+    const auto clock = get_external_clock_diagnostics();
+    uint32_t engine_bpm = 0, pending_ticks = 0, accepted_interval = 0, pulse_age = 0;
+    uint32_t internal_overlap = 0, external_overlap = 0, seed = 0;
+    #ifdef USE_UCLOCK
+        ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+            payload[5] = uClock.isStrictExternalMode();
+            payload[6] = uClock.isExternalClockStalled();
+            payload[7] = uClock.clock_state;
+            engine_bpm = (uint32_t)(uClock.getTempo() * 1000.0f);
+            pending_ticks = uClock.getExternalTicksRemaining();
+            accepted_interval = uClock.getLastAcceptedExternalInterval();
+            pulse_age = uClock.getExternalClockPulseAge();
+            internal_overlap = uClock.getIntOverflowCounter();
+            external_overlap = uClock.getExtOverflowCounter();
+        }
+    #endif
+    #ifdef ENABLE_EUCLIDIAN
+        if (sequencer) seed = static_cast<EuclidianSequencer*>(sequencer)->get_euclidian_seed();
+    #endif
+    const uint32_t fields[] = {
+        millis(), (uint32_t)(get_bpm() * 1000.0f), engine_bpm, ticks, seed,
+        input.pulses, input.resets, input.overflow,
+        input.pulses ? now - input.last_pulse_us : UINT32_MAX,
+        input.resets ? now - input.last_reset_us : UINT32_MAX,
+        input.interval_us, input.min_interval_us, input.max_interval_us,
+        input.queue_lag_us, input.max_queue_lag_us,
+        clock.received_pulses, clock.rejected_pulses, clock.delivered_sync_ticks,
+        clock.expected_sync_ticks, pending_ticks, accepted_interval, pulse_age,
+        internal_overlap, external_overlap, clock.input_ppqn
+    };
+    static_assert(sizeof(fields) / sizeof(fields[0]) == SYSEX_CLOCK_STATUS_FIELDS, "Clock status layout mismatch");
+    uint16_t offset = SYSEX_CLOCK_STATUS_HEADER_BYTES;
+    for (uint32_t value : fields) {
+        for (unsigned byte_index = 0; byte_index < 5; ++byte_index) {
+            payload[offset++] = value & 0x7f;
+            value >>= 7;
+        }
+    }
+    return offset;
+}
+
+static void send_clock_status_sysex(uint8_t req_id) {
+    uint8_t payload[SYSEX_CLOCK_STATUS_HEADER_BYTES + SYSEX_CLOCK_STATUS_FIELDS * 5];
+    const uint16_t length = build_clock_status_payload(payload);
+    send_sysex_frame(SYSEX_TYPE_CLOCK_STATUS_RESP, req_id, SYSEX_STATUS_OK, payload, length);
+}
+
+static void apply_sequencer_settings() {
+    #ifdef ENABLE_EUCLIDIAN
+        if (sequencer == nullptr) return;
+        auto* euclidian = static_cast<EuclidianSequencer*>(sequencer);
+        const uint64_t card_id = sw.UniqueCardID();
+        ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
+            euclidian->set_seed_identity((uint32_t)card_id ^ (uint32_t)(card_id >> 32));
+            euclidian->set_add_identity_enabled(current_settings.add_card_id_to_seed != 0);
+            euclidian->set_fills_enabled(current_settings.fills_enabled != 0);
+            euclidian->set_mutation_count(current_settings.mutation_amount);
+            euclidian->set_reset_before_mutate(current_settings.reset_before_mutate != 0);
+        }
+    #endif
+}
+
 static void handle_set_config_(uint8_t req_id, const uint8_t *data, unsigned length) {
     if (length < SYSEX_DATA_LEN) {
         enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
         return;
     }
+    if (length > 22 && length < 28) {
+        enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+        return;
+    }
+    if (length >= 28) {
+        for (unsigned index = 0; index < 6; ++index) {
+            if (data[22 + index] > (index == 3 ? 8 : 1)) {
+                enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
+                return;
+            }
+        }
+    }
     if (data[0] > FLASH_MAX_BANKS
-        || (length > SYSEX_DATA_LEN + 1 && data[SYSEX_DATA_LEN + 1] > MOMENTARY_BANK)) {
+        || (length > SYSEX_DATA_LEN + 1 && data[SYSEX_DATA_LEN + 1] > MOMENTARY_BANK)
+        || (length > SYSEX_DATA_LEN + 2 && !settings_valid_cv_clock_ppqn(data[SYSEX_DATA_LEN + 2]))) {
         enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
         return;
     }
@@ -803,6 +912,22 @@ static void handle_set_config_(uint8_t req_id, const uint8_t *data, unsigned len
         current_settings.knob_role[knob] = (InputRole)data[16 + knob];
     if (length > SYSEX_DATA_LEN + 1)
         current_settings.momentary_role = (MomentaryRole)data[SYSEX_DATA_LEN + 1];
+    if (length > SYSEX_DATA_LEN + 2) {
+        current_settings.cv_clock_ppqn = data[SYSEX_DATA_LEN + 2];
+        #if defined(USE_UCLOCK) && defined(ENABLE_CLOCK_INPUT_CV)
+            set_external_cv_clock_ppqn(current_settings.cv_clock_ppqn);
+        #endif
+    }
+    if (length >= 28) {
+        current_settings.extended_settings_version = 1;
+        current_settings.cv_reset_required = data[22];
+        current_settings.cv_reset_song_position = data[23];
+        current_settings.fills_enabled = data[24];
+        current_settings.mutation_amount = data[25];
+        current_settings.reset_before_mutate = data[26];
+        current_settings.add_card_id_to_seed = data[27];
+        apply_sequencer_settings();
+    }
     const bool persist = length == SYSEX_DATA_LEN || data[SYSEX_DATA_LEN] != 0;
     if (persist) settings_save(&current_settings);
     enqueue_pending_sysex(PENDING_SEND_ACK, req_id);
@@ -841,6 +966,16 @@ static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
     }
 
     payload[SYSEX_CONFIG_ROLE_OFFSET] = (uint8_t)current_settings.momentary_role;
+    payload[SYSEX_CONFIG_CV_PPQN_OFFSET] = current_settings.cv_clock_ppqn;
+    #if defined(USE_UCLOCK) && defined(ENABLE_CLOCK_INPUT_CV)
+        payload[SYSEX_CONFIG_CV_CLOCK_OFFSET] = 1;
+    #endif
+    const uint8_t options[] = {
+        current_settings.cv_reset_required, current_settings.cv_reset_song_position,
+        current_settings.fills_enabled, current_settings.mutation_amount,
+        current_settings.reset_before_mutate, current_settings.add_card_id_to_seed
+    };
+    memcpy(payload + SYSEX_CONFIG_OPTIONS_OFFSET, options, sizeof(options));
     *payload_len = SYSEX_CONFIG_PAYLOAD_LEN;
     return true;
 }
@@ -888,7 +1023,13 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
         return;
     }
 
-    if (type == SYSEX_TYPE_GET_CONFIG_REQ) {
+    if (type == SYSEX_TYPE_GET_CLOCK_STATUS_REQ) {
+        if (payload_len != 0) {
+            enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
+            return;
+        }
+        enqueue_pending_sysex(PENDING_SEND_CLOCK_STATUS, req_id);
+    } else if (type == SYSEX_TYPE_GET_CONFIG_REQ) {
         if (payload_len != 0) {
             enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_BAD_LENGTH);
             return;

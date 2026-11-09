@@ -477,6 +477,10 @@ function updateBankSlotOptionLabels() {
   }
 }
 
+function extendedSettingIds() {
+  return ['cfg-reset-required', 'cfg-reset-song', 'cfg-fills', 'cfg-mutation-amount', 'cfg-reset-mutation', 'cfg-seed-card-id'];
+}
+
 function updateBankActionAvailability() {
   const slot = parseInt(document.getElementById('bank-slot').value);
   const connected = !!midiOutput && slots.length > 0;
@@ -493,6 +497,14 @@ function updateBankActionAvailability() {
   if (playing) playing.disabled = !connected || !currentCfg || bankBusy || settingsBusy;
   const role = document.getElementById('cfg-momentary-role');
   if (role) role.disabled = !connected || !currentCfg || currentCfg.length < 148 || bankBusy || settingsBusy;
+  const cvClock = document.getElementById('cfg-cv-clock-ppqn');
+  if (cvClock) cvClock.disabled = !midiOutput || !currentCfg || currentCfg.length < 150
+    || !(currentCfg[149] & 1) || bankBusy || settingsBusy;
+  extendedSettingIds().forEach((id, index) => {
+    const control = document.getElementById(id);
+    if (control) control.disabled = !midiOutput || !currentCfg || currentCfg.length < 156
+      || (index < 2 && !(currentCfg[149] & 1)) || bankBusy || settingsBusy;
+  });
   const saveSettings = document.getElementById('save-settings-btn');
   if (saveSettings) saveSettings.disabled = !midiOutput || !currentCfg || bankBusy || settingsBusy;
   const refresh = document.getElementById('refresh-device-btn');
@@ -1721,6 +1733,7 @@ const SYSEX_TYPE_GET_SAMPLES_CHUNK_REQ = 0x17;
 const SYSEX_TYPE_GET_SAMPLE_META_INFO_REQ  = 0x18;
 const SYSEX_TYPE_GET_SAMPLE_META_CHUNK_REQ = 0x19;
 const SYSEX_TYPE_SET_SAMPLE_META_CHUNK_REQ = 0x1A;
+const SYSEX_TYPE_GET_CLOCK_STATUS_REQ = 0x1B;
 const SYSEX_TYPE_REBOOT_REQ     = 0x20;
 const SYSEX_TYPE_CONFIG_RESP    = 0x30;
 const SYSEX_TYPE_BANK_INFO_RESP = 0x40;
@@ -1730,6 +1743,7 @@ const SYSEX_TYPE_SAMPLES_INFO_RESP  = 0x43;
 const SYSEX_TYPE_SAMPLES_CHUNK_RESP = 0x44;
 const SYSEX_TYPE_SAMPLE_META_INFO_RESP  = 0x45;
 const SYSEX_TYPE_SAMPLE_META_CHUNK_RESP = 0x46;
+const SYSEX_TYPE_CLOCK_STATUS_RESP = 0x47;
 const SYSEX_TYPE_ACK            = 0x31;
 const SYSEX_TYPE_NACK           = 0x32;
 
@@ -1789,6 +1803,146 @@ let midiInput   = null;
 let midiInputsBound = [];
 
 const midiPendingRequests = new Map();
+const CLOCK_TRACE_LIMIT = 1200;
+const CLOCK_STATUS_FIELDS = [
+  'uptimeMs', 'setBpm', 'engineBpm', 'tick', 'seed', 'rawPulses', 'rawResets',
+  'queueLost', 'pulseAgeUs', 'resetAgeUs', 'intervalUs', 'minIntervalUs', 'maxIntervalUs',
+  'queueLagUs', 'maxQueueLagUs', 'receivedPulses', 'rejectedPulses', 'deliveredTicks',
+  'expectedTicks', 'pendingTicks', 'acceptedIntervalUs', 'enginePulseAgeUs',
+  'internalReentry', 'externalReentry', 'inputPPQN'
+];
+let clockStatusTimer = null;
+let clockStatusLatest = null;
+let clockStatusBusy = false;
+let clockStatusEpoch = 0;
+let clockRecording = false;
+let clockTrace = [];
+
+function decodeClockStatus(payload) {
+  if (!payload || payload.length !== 140 || payload[0] !== 1
+      || payload.some(value => !Number.isInteger(value) || value < 0 || value > 127))
+    throw new Error('Unsupported or truncated clock status');
+  const status = {
+    version: payload[0], cvEnabled: !!payload[1], source: payload[2], playing: !!payload[3],
+    waiting: !!payload[4], strict: !!payload[5], stalled: !!payload[6], engineState: payload[7],
+    cvPPQN: payload[8], resetRequired: !!payload[9], resetSongPosition: !!payload[10],
+    fills: !!payload[11], mutationAmount: payload[12], resetBeforeMutation: !!payload[13], seedCardId: !!payload[14]
+  };
+  CLOCK_STATUS_FIELDS.forEach((name, index) => {
+    const offset = 15 + index * 5;
+    if (payload[offset + 4] > 15) throw new Error('Invalid clock counter');
+    let value = 0;
+    for (let byte = 0; byte < 5; ++byte) value += payload[offset + byte] * 2 ** (7 * byte);
+    status[name] = value;
+  });
+  status.setBpm /= 1000;
+  status.engineBpm /= 1000;
+  status.detectedBpm = status.cvEnabled && status.intervalUs && status.cvPPQN
+    ? 60000000 / (status.intervalUs * status.cvPPQN) : null;
+  return status;
+}
+
+function updateClockTraceControls() {
+  document.getElementById('clock-record').disabled = !midiOutput || !clockStatusLatest
+    || !currentCfg || currentCfg.length < 156 || clockTrace.length >= CLOCK_TRACE_LIMIT;
+  document.getElementById('clock-record-label').textContent = clockRecording ? 'Stop recording' : 'Record trace';
+  document.getElementById('clock-record').setAttribute('aria-pressed', String(clockRecording));
+  document.getElementById('clock-download').disabled = clockTrace.length === 0;
+  document.getElementById('clock-clear').disabled = clockTrace.length === 0 || clockRecording;
+  document.getElementById('clock-record-count').textContent = `${clockTrace.length} samples${clockTrace.length >= CLOCK_TRACE_LIMIT ? ' (full)' : ''}`;
+}
+
+function renderClockStatus(status) {
+  const previous = clockStatusLatest;
+  clockStatusLatest = status;
+  const text = (id, value) => { document.getElementById(id).textContent = value; };
+  const ms = value => value === 0xffffffff ? '--' : `${(value / 1000).toFixed(2)} ms`;
+  text('clock-connection', 'Live');
+  text('clock-set-bpm', status.setBpm.toFixed(2));
+  text('clock-engine-bpm', status.engineBpm.toFixed(2));
+  text('clock-detected-bpm', status.detectedBpm === null ? '--' : status.detectedBpm.toFixed(2));
+  text('clock-source', `${['Internal', 'USB MIDI', 'CV', 'Other MIDI'][status.source] || 'Unknown'} / ${status.inputPPQN}`);
+  text('clock-state', `${status.playing ? 'Playing' : 'Stopped'} / ${status.strict ? 'strict' : 'free'}${status.waiting ? ' / waiting' : ''}`);
+  text('clock-pulses', status.rawPulses);
+  text('clock-resets', status.rawResets);
+  for (const [field, id] of [['rawPulses', 'clock-pulse-light'], ['rawResets', 'clock-reset-light']]) {
+    if (previous && status.uptimeMs >= previous.uptimeMs && status[field] !== previous[field]) {
+      const light = document.getElementById(id);
+      light.className = 'clock-edge active';
+      setTimeout(() => { light.className = 'clock-edge'; }, 250);
+    }
+  }
+  text('clock-ages', `${ms(status.pulseAgeUs)} / ${ms(status.resetAgeUs)}`);
+  text('clock-interval', `${ms(status.intervalUs)} / ${ms(status.minIntervalUs)} / ${ms(status.maxIntervalUs)}`);
+  text('clock-queue', `${status.queueLost} / ${ms(status.queueLagUs)} / ${ms(status.maxQueueLagUs)}`);
+  text('clock-accepted', `${status.receivedPulses} / ${status.rejectedPulses}`);
+  text('clock-delivery', `${status.deliveredTicks} / ${status.expectedTicks}`);
+  text('clock-strict', `${status.pendingTicks} / ${status.stalled ? 'yes' : 'no'}`);
+  text('clock-engine-timing', `${ms(status.acceptedIntervalUs)} / ${ms(status.enginePulseAgeUs)}`);
+  text('clock-overlap', `${status.internalReentry} / ${status.externalReentry}`);
+  text('clock-position', `${status.tick} / ${status.seed | 0}`);
+  const warnings = [];
+  if (status.queueLost) warnings.push(`${status.queueLost} CV input events lost since boot.`);
+  if (status.detectedBpm !== null && (status.detectedBpm < 1 || status.detectedBpm > 500))
+    warnings.push('Detected CV tempo outside engine range (1-500 BPM).');
+  if (!status.cvEnabled) warnings.push('CV clock input unavailable in this firmware.');
+  text('clock-warning', warnings.join(' '));
+  if (clockRecording && clockTrace.length < CLOCK_TRACE_LIMIT) {
+    clockTrace.push({ browserTime: new Date().toISOString(), ...status });
+    if (clockTrace.length >= CLOCK_TRACE_LIMIT) clockRecording = false;
+  }
+  updateClockTraceControls();
+}
+
+async function pollClockStatus() {
+  if (!midiOutput || !currentCfg || currentCfg.length < 156) {
+    document.getElementById('clock-connection').textContent = !midiOutput ? 'Not connected.' : 'Clock diagnostics require newer firmware.';
+    updateClockTraceControls();
+    return;
+  }
+  if (clockStatusBusy || bankBusy || sampleMetaBusy || settingsBusy || midiPendingRequests.size
+      || (!clockRecording && !document.getElementById('tab-clock').classList.contains('active'))) return;
+  clockStatusBusy = true;
+  const epoch = clockStatusEpoch;
+  try {
+    const response = await requestSysexResponse(SYSEX_TYPE_GET_CLOCK_STATUS_REQ, [], [SYSEX_TYPE_CLOCK_STATUS_RESP], 1500, 0);
+    if (epoch !== clockStatusEpoch) return;
+    renderClockStatus(decodeClockStatus(response.payload));
+  } catch (error) {
+    if (epoch !== clockStatusEpoch) return;
+    document.getElementById('clock-connection').textContent = `Clock status unavailable: ${error.message}`;
+    clockRecording = false;
+    updateClockTraceControls();
+  } finally {
+    clockStatusBusy = false;
+  }
+}
+
+function startClockStatusPolling() {
+  if (clockStatusTimer === null) clockStatusTimer = setInterval(pollClockStatus, 500);
+  pollClockStatus();
+}
+
+function toggleClockRecording() {
+  if (!clockRecording && (!midiOutput || !clockStatusLatest || clockTrace.length >= CLOCK_TRACE_LIMIT)) return;
+  clockRecording = !clockRecording;
+  updateClockTraceControls();
+}
+
+function clearClockTrace() {
+  if (clockRecording) return;
+  clockTrace = [];
+  updateClockTraceControls();
+}
+
+function downloadClockTrace() {
+  if (!clockTrace.length) return;
+  const trace = { format: 'compulidian-clock-trace', version: 1, downloadedAt: new Date().toISOString(), samples: clockTrace };
+  triggerDownload(new TextEncoder().encode(JSON.stringify(trace, null, 2)), 'compulidian-clock-trace.json', 'application/json');
+}
+window.toggleClockRecording = toggleClockRecording;
+window.clearClockTrace = clearClockTrace;
+window.downloadClockTrace = downloadClockTrace;
 let midiNextRequestId = 1;
 let midiReconnectTimer = null;
 let midiReconnectAttempt = 0;
@@ -1877,6 +2031,17 @@ function getMidiInputs() {
 }
 
 function clearPendingRequests(errMsg) {
+  ++clockStatusEpoch;
+  if (clockStatusTimer !== null) clearInterval(clockStatusTimer);
+  clockStatusTimer = null;
+  clockStatusLatest = null;
+  clockRecording = false;
+  document.getElementById('clock-connection').textContent = errMsg;
+  document.getElementById('clock-record').disabled = true;
+  document.getElementById('clock-record-label').textContent = 'Record trace';
+  document.getElementById('clock-record').setAttribute('aria-pressed', 'false');
+  document.getElementById('clock-clear').disabled = clockTrace.length === 0;
+  document.querySelectorAll('#tab-clock dd[id]').forEach(element => { element.textContent = '--'; });
   const err = new Error(errMsg);
   for (const [reqId, pending] of midiPendingRequests.entries()) {
     clearTimeout(pending.timeoutId);
@@ -2408,6 +2573,7 @@ async function midiConnect(isReconnectAttempt = false) {
     await onBankSlotChanged();
   }
   updateSettingsState();
+  startClockStatusPolling();
 }
 window.midiConnect = midiConnect;
 
@@ -2479,16 +2645,31 @@ window.readConfig = () => readConfig().catch(e => {
   console.warn('readConfig failed:', e);
 });
 
+function buildSettingsRequest(persist) {
+  const data = buildCfgFromUI();
+  data.push(persist);
+  if (currentCfg && currentCfg.length >= 148)
+    data.push(Number(document.getElementById('cfg-momentary-role').value));
+  if (currentCfg && currentCfg.length >= 150 && (currentCfg[149] & 1))
+    data.push(Number(document.getElementById('cfg-cv-clock-ppqn').value));
+  if (currentCfg && currentCfg.length >= 156) {
+    if (data.length < 22) data.push(currentCfg[148]);
+    extendedSettingIds().forEach((id, index) => {
+      const control = document.getElementById(id);
+      data.push(index < 2 && !(currentCfg[149] & 1) ? currentCfg[150 + index]
+        : index === 3 ? Number(control.value) : Number(control.checked));
+    });
+  }
+  return data;
+}
+
 async function saveConfig() {
   if (settingsBusy || bankBusy) return;
   if (!midiOutput) {
     setConfigStatus('Not connected.', true, false);
     throw new Error('Not connected');
   }
-  const d = buildCfgFromUI();
-  d.push(1); // persist=1 -> write to flash so it survives a reboot
-  if (currentCfg && currentCfg.length >= 148)
-    d.push(Number(document.getElementById('cfg-momentary-role').value));
+  const d = buildSettingsRequest(1);
   setConfigStatus('Config sent. Waiting for confirmation…', false, false);
   settingsBusy = true;
   updateSettingsState();
@@ -2521,10 +2702,7 @@ async function applyConfigLive() {
   if (settingsBusy || bankBusy) return;
   updateBankStateBanner();
   if (!midiOutput) return;
-  const d = buildCfgFromUI();
-  d.push(0); // persist=0 -> apply only, do not write to flash
-  if (currentCfg && currentCfg.length >= 148)
-    d.push(Number(document.getElementById('cfg-momentary-role').value));
+  const d = buildSettingsRequest(0);
   settingsBusy = true;
   updateSettingsState();
   try {
@@ -2611,6 +2789,19 @@ function applyCfgToUI(d) {
   momentaryRole.disabled = d.length < 148;
   momentaryRole.value = d.length >= 148 ? d[147] : 0;
   momentaryRole.title = d.length >= 148 ? '' : 'Update firmware to configure the switch role';
+  const cvClock = document.getElementById('cfg-cv-clock-ppqn');
+  cvClock.disabled = d.length < 150 || !(d[149] & 1);
+  cvClock.value = d.length >= 149 ? d[148] : 1;
+  cvClock.title = d.length < 150 ? 'Update firmware to configure CV clock PPQN'
+    : !(d[149] & 1) ? 'CV clock input is not enabled in this firmware' : '';
+  extendedSettingIds().forEach((id, index) => {
+    const control = document.getElementById(id);
+    control.disabled = d.length < 156 || (index < 2 && !(d[149] & 1));
+    const value = d.length >= 156 ? d[150 + index] : [1, 1, 1, 3, 1, 0][index];
+    if (index === 3) control.value = value;
+    else control.checked = value !== 0;
+    control.title = d.length < 156 ? 'Update firmware to configure this setting' : '';
+  });
   // Bank names appended after settings data (32 bytes each, ASCII)
   const nameBase = 19;
   const dec = new TextDecoder();

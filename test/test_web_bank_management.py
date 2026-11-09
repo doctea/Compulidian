@@ -329,6 +329,8 @@ function element(id) {
   if (!elements.has(id)) elements.set(id, {
     value: '0', textContent: '', style: {}, dataset: {}, options: [],
     appendChild(child) { this.options.push(child); },
+    setAttribute(name, value) { this[name] = value; },
+    classList: { contains() { return true; } },
   });
   return elements.get(id);
 }
@@ -338,6 +340,10 @@ const context = {
   SYSEX_TYPE_GET_SLOTS_REQ: 20, SYSEX_TYPE_SLOTS_INFO_RESP: 66,
   SYSEX_TYPE_SET_CONFIG_REQ: 17, SYSEX_TYPE_CONFIG_RESP: 48,
   SYSEX_TYPE_SET_BANK_CHUNK_REQ: 25,
+  SYSEX_TYPE_GET_CLOCK_STATUS_REQ: 27, SYSEX_TYPE_CLOCK_STATUS_RESP: 71,
+  midiPendingRequests: new Map(), clockStatusBusy: false, clockStatusEpoch: 0,
+  clockStatusLatest: null, clockRecording: false, clockTrace: [],
+  setTimeout() {},
   slots: [], compiledSamples: [], bankSlots: [], sampleList: [],
   bankDirty: false, loadedForSlot: 1,
   bankBusy: false,
@@ -363,6 +369,8 @@ const startupContext = vm.createContext({ ...context });
 const startupEnd = source.indexOf('\nupdateSlotOptions();') + '\nupdateSlotOptions();'.length;
 vm.runInContext(source.slice(0, startupEnd), startupContext);
 vm.createContext(context);
+vm.runInContext(source.match(/const CLOCK_STATUS_FIELDS = \[[\s\S]*?\];/)[0], context);
+vm.runInContext(source.match(/^const CLOCK_TRACE_LIMIT =.*;$/m)[0], context);
 vm.runInContext(source.slice(0, source.indexOf('// Slot state')), context);
 vm.runInContext(source.match(/^const (?:SYSEX_BANK_WRITE_MAX_BYTES|SYSEX_BANK_WRITE_RAW_CHUNK_BYTES|SYSEX_META_WRITE_MAX_BYTES|SYSEX_META_WRITE_RAW_CHUNK_BYTES|HEX_CHARS|MIDI_BANK_CHUNK_TIMEOUT_MS|MIDI_MAX_RETRIES|SYSEX_TYPE_(?:ACK|SET_SAMPLE_META_CHUNK_REQ))\s*=.*;$/gm).join('\n'), context);
 for (const anchor of [
@@ -372,6 +380,10 @@ for (const anchor of [
   'function updateBankStateBanner()', 'function applyCfgToUI(',
   'function updateBankActionAvailability()',
   'function buildCfgFromUI()',
+  'function extendedSettingIds()', 'function buildSettingsRequest(',
+  'function decodeClockStatus(', 'function updateClockTraceControls()',
+  'function renderClockStatus(', 'async function pollClockStatus()',
+  'function toggleClockRecording()', 'function clearClockTrace()', 'function downloadClockTrace()',
   'async function onBankSlotChanged()',
   'async function writeBankToDevice(',
   'function setSampleMetaTags(', 'function buildSampleMetaText(',
@@ -448,6 +460,71 @@ for (const anchor of [
   context.requestSysexResponse = async (type, data) => { configSent = Array.from(data); };
   await context.saveConfig();
   assert.equal(configSent.length, 20);
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, true);
+  context.currentCfg = [...context.currentCfg, 1, 4, 1];
+  context.applyCfgToUI(context.currentCfg);
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, false);
+  assert.equal(element('cfg-cv-clock-ppqn').value, 4);
+  context.requestSysexResponse = async (type, data) => {
+    configSent = Array.from(data);
+    context.currentCfg[147] = data[20];
+    if (data.length > 21) context.currentCfg[148] = data[21];
+    context.applyCfgToUI(context.currentCfg);
+  };
+  for (const ppqn of [1, 2, 4, 8, 12, 16, 24]) {
+    element('cfg-cv-clock-ppqn').value = String(ppqn);
+    await context.applyConfigLive();
+    assert.equal(configSent.length, 22);
+    assert.deepEqual(configSent.slice(19), [0, 1, ppqn]);
+    assert.equal(context.currentCfg[148], ppqn);
+    assert.equal(context.settingsDirty, true);
+  }
+  element('cfg-cv-clock-ppqn').value = '12';
+  await context.saveConfig();
+  assert.deepEqual(configSent.slice(19), [1, 1, 12]);
+  assert.equal(context.settingsDirty, false);
+  context.requestSysexResponse = async () => { throw new Error('Device NACK 4'); };
+  element('cfg-cv-clock-ppqn').value = '2';
+  await context.applyConfigLive();
+  assert.equal(element('cfg-cv-clock-ppqn').value, 12);
+  context.updateBankActionAvailability();
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, false);
+  context.bankBusy = true;
+  context.updateBankActionAvailability();
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, true);
+  context.bankBusy = false;
+  context.settingsBusy = true;
+  context.updateBankActionAvailability();
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, true);
+  context.settingsBusy = false;
+  context.currentCfg[149] = 0;
+  context.applyCfgToUI(context.currentCfg);
+  assert.equal(element('cfg-cv-clock-ppqn').disabled, true);
+  assert.match(element('cfg-cv-clock-ppqn').title, /not enabled/);
+  context.requestSysexResponse = async (type, data) => { configSent = Array.from(data); };
+  await context.saveConfig();
+  assert.equal(configSent.length, 21);
+  assert.equal(context.currentCfg[148], 12);
+  context.currentCfg = [...context.currentCfg, 1, 1, 1, 3, 1, 0];
+  context.applyCfgToUI(context.currentCfg);
+  assert.equal(element('cfg-reset-required').disabled, true);
+  assert.equal(element('cfg-fills').disabled, false);
+  assert.equal(element('cfg-reset-song').checked, true);
+  assert.equal(element('cfg-mutation-amount').value, 3);
+  element('cfg-fills').checked = false;
+  element('cfg-mutation-amount').value = '8';
+  element('cfg-reset-mutation').checked = false;
+  element('cfg-seed-card-id').checked = true;
+  await context.applyConfigLive();
+  assert.deepEqual(configSent.slice(21), [12, 1, 1, 0, 8, 0, 1]);
+  context.currentCfg[149] = 1;
+  context.applyCfgToUI(context.currentCfg);
+  assert.equal(element('cfg-reset-required').disabled, false);
+  element('cfg-reset-required').checked = false;
+  element('cfg-reset-song').checked = false;
+  await context.saveConfig();
+  assert.equal(configSent.length, 28);
+  assert.deepEqual(configSent.slice(22), [0, 0, 1, 3, 1, 0]);
   let bankReads = 0;
   context.loadedForSlot = 1;
   context.bankDirty = true;
@@ -561,6 +638,66 @@ for (const anchor of [
   assert.equal(context.sampleMetaDirty, false);
   assert.equal(context.sampleMetaBusy, false);
   console.log('PASS: sample-tag refresh preservation, failed-save recovery and in-flight edit protection');
+  const clockPayload = [1, 1, 2, 1, 0, 1, 0, 2, 24, 0, 0, 1, 3, 1, 1];
+  const values = [1234, 120000, 119500, 987654, 0xffffffff, 99, 2, 3, 400, 0xffffffff,
+    10000, 9000, 11000, 123, 456, 98, 1, 98, 98, 4, 10000, 400, 0, 0, 24];
+  values.forEach(value => { for (let index = 0; index < 5; ++index) clockPayload.push(Math.floor(value / 2 ** (index * 7)) & 127); });
+  const clock = context.decodeClockStatus(clockPayload);
+  assert.equal(clock.seed, 0xffffffff);
+  assert.equal(clock.setBpm, 120);
+  assert.equal(clock.engineBpm, 119.5);
+  assert.equal(clock.detectedBpm, 250);
+  assert.equal(clock.resetAgeUs, 0xffffffff);
+  assert.throws(() => context.decodeClockStatus(clockPayload.slice(1)), /Unsupported/);
+  const invalidCounter = [...clockPayload]; invalidCounter[19] = 16;
+  assert.throws(() => context.decodeClockStatus(invalidCounter), /Invalid clock counter/);
+  context.currentCfg = new Array(156).fill(0);
+  context.renderClockStatus(clock);
+  assert.equal(element('clock-detected-bpm').textContent, '250.00');
+  assert.match(element('clock-warning').textContent, /3 CV input events lost/);
+  assert.equal(element('clock-position').textContent, '987654 / -1');
+  context.toggleClockRecording();
+  context.renderClockStatus({ ...clock, rawPulses: 120, rawResets: 3 });
+  assert.equal(context.clockTrace.length, 1);
+  assert.equal(element('clock-pulse-light').className, 'clock-edge active');
+  assert.equal(element('clock-reset-light').className, 'clock-edge active');
+  context.clearClockTrace();
+  assert.equal(context.clockTrace.length, 1);
+  let download;
+  context.triggerDownload = (bytes, filename, mime) => { download = { json: JSON.parse(new TextDecoder().decode(bytes)), filename, mime }; };
+  context.downloadClockTrace();
+  assert.equal(download.json.format, 'compulidian-clock-trace');
+  assert.equal(download.json.samples[0].rawPulses, 120);
+  assert.equal(download.mime, 'application/json');
+  context.toggleClockRecording();
+  context.clearClockTrace();
+  assert.equal(context.clockTrace.length, 0);
+  context.clockTrace = new Array(1199).fill(clock);
+  context.toggleClockRecording();
+  context.renderClockStatus(clock);
+  assert.equal(context.clockTrace.length, 1200);
+  assert.equal(context.clockRecording, false);
+  assert.equal(element('clock-record').disabled, true);
+  context.clearClockTrace();
+  let clockReads = 0;
+  context.bankBusy = false; context.sampleMetaBusy = false; context.settingsBusy = false;
+  context.requestSysexResponse = async (type, payload, types, timeout, retries) => {
+    ++clockReads;
+    assert.equal(type, 27); assert.equal(types[0], 71); assert.equal(retries, 0);
+    return { payload: clockPayload };
+  };
+  context.bankBusy = true; await context.pollClockStatus(); assert.equal(clockReads, 0);
+  context.bankBusy = false;
+  context.midiPendingRequests.set(1, {}); await context.pollClockStatus(); assert.equal(clockReads, 0);
+  context.midiPendingRequests.clear();
+  const polling = context.pollClockStatus(); await context.pollClockStatus(); await polling;
+  assert.equal(clockReads, 1);
+  context.currentCfg = new Array(150).fill(0); await context.pollClockStatus(); assert.equal(clockReads, 1);
+  context.currentCfg = new Array(156).fill(0);
+  context.requestSysexResponse = async () => { ++context.clockStatusEpoch; return { payload: clockPayload }; };
+  context.clockStatusLatest = null;
+  await context.pollClockStatus(); assert.equal(context.clockStatusLatest, null);
+  console.log('PASS: MIDI-safe clock decoder, BPM/readouts, edge indicators, bounded JSON traces, polling exclusion and stale-response protection');
   console.log('PASS: automatic empty-bank drafts, copy/cancel/failure, dirty-source preservation, compiled index zero, hidden settings round-trip and reconnect draft protection');
   console.log('PASS: compiled-only bank loading, non-destructive bank rejection, compiled catalog, page startup, bank-config round-trip, rejected/confirmed bank changes');
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -573,6 +710,7 @@ CONTROLS_HARNESS = r"""
 #include "settings.h"
 #include <cstddef>
 #include <cstring>
+#include <initializer_list>
 #define ATOMIC_BLOCK(mode) for (bool atomic_once = true; atomic_once; atomic_once = false)
 using byte = uint8_t;
 struct ComputerCard {
@@ -587,6 +725,7 @@ struct ComputerCard {
   Switch SwitchVal() { return position; }
   bool SwitchReady() const { return ready; }
   void LedOn(int led, bool on = true) { leds[led] = on; }
+  uint64_t UniqueCardID() { return UINT64_C(0x1234567887654321); }
 } sw;
 class ComputerCardVoltageSource {
 public:
@@ -608,6 +747,14 @@ struct EuclidianPattern {
 };
 struct EuclidianSequencer {
   bool locked = false;
+  bool fills = true, reset_mutation = true, identity = false;
+  int mutation = 3;
+  uint32_t identity_value = 0;
+  void set_seed_identity(uint32_t value) { identity_value = value; }
+  void set_add_identity_enabled(bool value) { identity = value; }
+  void set_fills_enabled(bool value) { fills = value; }
+  void set_mutation_count(int value) { mutation = value; }
+  void set_reset_before_mutate(bool value) { reset_mutation = value; }
   EuclidianPattern patterns[2];
   unsigned int get_number_patterns() { return 2; }
   EuclidianPattern* get_pattern(unsigned int index) { return &patterns[index]; }
@@ -657,6 +804,20 @@ void enqueue_pending_sysex(int response, uint8_t, int error = 0) {
   last_response = response;
   last_error = error;
 }
+#define USE_UCLOCK
+#define ENABLE_EUCLIDIAN
+#ifndef TEST_NO_CV_CLOCK
+#define ENABLE_CLOCK_INPUT_CV
+#endif
+int applied_cv_ppqn = 0;
+bool set_external_cv_clock_ppqn(uint16_t ppqn) { applied_cv_ppqn = ppqn; return true; }
+Settings g_settings_storage;
+void ensure_settings_root() {}
+void sl_load_from_file(const char*, int) {}
+#define LIVE_SETTINGS_SAVE_PATH "/save/settings.txt"
+constexpr int SL_SCOPE_SYSTEM = 0;
+@LOAD_SETTINGS@
+@APPLY_SEQUENCER@
 @SET_CONFIG@
 @BUILD_CONFIG@
 @HANDLE_CONTROLS@
@@ -696,8 +857,34 @@ void clock_start() {
 @START_PLAYBACK@
 int main() {
   static_assert(offsetof(Settings, momentary_role) == 9);
+  static_assert(offsetof(Settings, cv_clock_ppqn) == 10);
   static_assert(offsetof(Settings, outputs) == 12);
   assert(settings_defaults().momentary_role == MOMENTARY_MUTE);
+  assert(settings_defaults().cv_clock_ppqn == 1);
+  static_assert(offsetof(Settings, extended_settings_version) == 33);
+  auto extended = settings_defaults();
+  assert(extended.cv_reset_required && extended.cv_reset_song_position && extended.fills_enabled);
+  assert(extended.mutation_amount == 3 && extended.reset_before_mutate && !extended.add_card_id_to_seed);
+  extended.extended_settings_version = 0;
+  extended.cv_reset_required = extended.cv_reset_song_position = extended.fills_enabled = 0;
+  extended.mutation_amount = extended.reset_before_mutate = 0;
+  settings_normalize_extended(extended);
+  assert(extended.cv_reset_required && extended.cv_reset_song_position && extended.fills_enabled);
+  assert(extended.mutation_amount == 3 && extended.reset_before_mutate);
+  extended.cv_reset_required = extended.cv_reset_song_position = extended.fills_enabled = 0;
+  extended.mutation_amount = extended.reset_before_mutate = 0;
+  extended.add_card_id_to_seed = 1;
+  settings_normalize_extended(extended);
+  assert(!extended.cv_reset_required && !extended.cv_reset_song_position && !extended.fills_enabled);
+  assert(!extended.mutation_amount && !extended.reset_before_mutate && extended.add_card_id_to_seed);
+  for (int ppqn = 0; ppqn <= 255; ++ppqn)
+    assert(settings_valid_cv_clock_ppqn(ppqn) == (ppqn == 1 || ppqn == 2
+      || ppqn == 4 || ppqn == 8 || ppqn == 12 || ppqn == 16 || ppqn == 24));
+  for (int ppqn : {0, 1, 2, 3, 4, 8, 12, 16, 24, 25, 255}) {
+    g_settings_storage = settings_defaults();
+    g_settings_storage.cv_clock_ppqn = ppqn;
+    assert(settings_load().cv_clock_ppqn == (settings_valid_cv_clock_ppqn(ppqn) ? ppqn : 1));
+  }
   DeviceControls controls;
   auto poll = [&](uint32_t now, bool down, uint16_t main, uint16_t knob_x = 1000) {
     controls.update(now, down, main, knob_x, 0x15, 2, MOMENTARY_MUTE);
@@ -851,7 +1038,8 @@ int main() {
   assert(clock_starts == 1);
 
   current_settings.momentary_role = MOMENTARY_BANK;
-  uint8_t request[21] = {};
+  current_settings.cv_clock_ppqn = 8;
+  uint8_t request[28] = {};
   request[0] = 0;
   handle_set_config_(1, request, 19);
   assert(current_settings.momentary_role == MOMENTARY_BANK && saves == 3);
@@ -879,11 +1067,76 @@ int main() {
   assert(last_response == PENDING_SEND_NACK);
   handle_set_config_(1, nullptr, 0);
   assert(last_error == SYSEX_NACK_BAD_LENGTH);
-  uint8_t response[149];
+  assert(current_settings.cv_clock_ppqn == 8 && applied_cv_ppqn == 0);
+  bankManager.fail = false;
+  for (uint8_t ppqn : {1, 2, 4, 8, 12, 16, 24}) {
+    request[0] = 4;
+    request[19] = 0;
+    request[20] = MOMENTARY_BANK;
+    request[21] = ppqn;
+    handle_set_config_(1, request, 22);
+    assert(current_settings.cv_clock_ppqn == ppqn && saves == 4);
+    #ifdef ENABLE_CLOCK_INPUT_CV
+      assert(applied_cv_ppqn == ppqn);
+    #else
+      assert(applied_cv_ppqn == 0);
+    #endif
+  }
+  for (uint8_t ppqn : {0, 3, 23, 25, 127}) {
+    request[0] = 2;
+    request[19] = 1;
+    request[20] = MOMENTARY_MUTE;
+    request[21] = ppqn;
+    handle_set_config_(1, request, 22);
+    assert(last_response == PENDING_SEND_NACK && last_error == SYSEX_NACK_INVALID_VALUE);
+    assert(bankManager.active_bank() == 4 && current_settings.active_bank == 4);
+    assert(current_settings.cv_clock_ppqn == 24 && current_settings.momentary_role == MOMENTARY_BANK && saves == 4);
+  }
+  request[0] = 4;
+  request[20] = MOMENTARY_BANK;
+  request[21] = 12;
+  handle_set_config_(1, request, 22);
+  assert(saves == 5 && current_settings.cv_clock_ppqn == 12);
+  request[19] = 0;
+  request[22] = request[23] = request[24] = request[26] = 0;
+  request[25] = 8;
+  request[27] = 1;
+  handle_set_config_(1, request, 28);
+  assert(saves == 5 && !current_settings.cv_reset_required && !current_settings.cv_reset_song_position);
+  assert(!sequence.fills && sequence.mutation == 8 && !sequence.reset_mutation && sequence.identity);
+  assert(sequence.identity_value == (0x12345678u ^ 0x87654321u));
+  for (int index = 22; index < 28; ++index) {
+    const uint8_t previous = request[index];
+    request[index] = index == 25 ? 9 : 2;
+    request[0] = 2;
+    handle_set_config_(1, request, 28);
+    assert(last_response == PENDING_SEND_NACK && bankManager.active_bank() == 4 && saves == 5);
+    assert(sequence.mutation == 8 && sequence.identity);
+    request[index] = previous;
+  }
+  for (int length = 23; length < 28; ++length) {
+    handle_set_config_(1, request, length);
+    assert(last_response == PENDING_SEND_NACK && last_error == SYSEX_NACK_BAD_LENGTH);
+  }
+  request[0] = 4;
+  request[19] = 1;
+  handle_set_config_(1, request, 28);
+  assert(saves == 6);
+  request[19] = 0;
+  handle_set_config_(1, request, 22);
+  assert(sequence.mutation == 8 && current_settings.add_card_id_to_seed && !current_settings.cv_reset_required);
+  uint8_t response[157];
   memset(response, 0xa5, sizeof(response));
   uint16_t length = 0;
   assert(build_config_payload(response, &length));
-  assert(length == 148 && response[147] == MOMENTARY_BANK && response[148] == 0xa5);
+  assert(length == 156 && response[147] == MOMENTARY_BANK && response[148] == 12 && response[156] == 0xa5);
+  assert(response[150] == 0 && response[151] == 0 && response[152] == 0);
+  assert(response[153] == 8 && response[154] == 0 && response[155] == 1);
+  #ifdef ENABLE_CLOCK_INPUT_CV
+    assert(response[149] == 1);
+  #else
+    assert(response[149] == 0);
+  #endif
   assert(response[0] == 4 && response[1] == 3);
   assert(strcmp(reinterpret_cast<const char*>(response + 51), "Two") == 0);
 }
@@ -986,6 +1239,45 @@ int main() {
 """
 
 
+SEED_HARNESS = r"""
+#include <cassert>
+#include <cstdint>
+uint32_t phrase = 3;
+#define BPM_CURRENT_PHRASE phrase
+struct EuclidianSequencer {
+  int seed = 0;
+  uint32_t seed_identity = 0;
+  bool add_identity_to_seed = false, add_phrase_to_seed = true, seed_locked = false;
+  uint32_t last_locked_seed = 0;
+  @SEED_METHODS@
+};
+int main() {
+  EuclidianSequencer sequence;
+  sequence.set_seed_identity(100);
+  assert(sequence.get_euclidian_seed() == 3);
+  sequence.set_add_identity_enabled(true);
+  assert(sequence.get_euclidian_seed() == 103);
+  phrase = 4;
+  assert(sequence.get_euclidian_seed() == 104);
+  sequence.set_euclidian_seed(12);
+  assert(sequence.get_euclidian_seed() == 12);
+  sequence.set_euclidian_seed_lock(true);
+  phrase = 8;
+  sequence.set_seed_identity(200);
+  assert(sequence.get_euclidian_seed() == 12);
+  sequence.set_euclidian_seed_lock(false);
+  assert(sequence.get_euclidian_seed() == 116);
+  sequence.set_seed_identity(UINT32_MAX);
+  sequence.set_euclidian_seed(INT32_MIN);
+  assert(sequence.get_euclidian_seed() == INT32_MIN);
+  sequence.set_add_identity_enabled(false);
+  sequence.set_add_phrase_enabled(false);
+  sequence.set_euclidian_seed(42);
+  assert(sequence.get_euclidian_seed() == 42);
+}
+"""
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     compiler = shutil.which('g++') or shutil.which('clang++')
@@ -1012,7 +1304,7 @@ def main():
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', str(source), '-o', str(executable)], check=True)
         payload = subprocess.check_output([str(executable)], text=True)
         json.loads(payload)
-        subprocess.run([node, '-e', JS_HARNESS, str(root / 'tools/web/compulidian_manager.js')], input=payload, text=True, check=True)
+        subprocess.run([node, '-e', JS_HARNESS, str(root / 'web/compulidian_manager.js')], input=payload, text=True, check=True)
         audio_header = (root / 'include/audio/audio.h').read_text()
         source.write_text(AUDIO_HARNESS.replace('@PLAYER@', extract_block(audio_header, 'class SamplePlayer : public ComputerCard')))
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', str(source), '-o', str(executable)], check=True)
@@ -1021,19 +1313,35 @@ def main():
         controls = CONTROLS_HARNESS.replace('@KNOB_SOURCE@', extract_block((root / 'src/cv_input.cpp').read_text(), 'class ControlKnobVoltageSource'))
         controls = controls.replace('@HANDLE_CONTROLS@', extract_block(configurator, 'static void handle_config_mode()'))
         controls = controls.replace('@SET_CONFIG@', extract_block(configurator, 'static void handle_set_config_('))
+        controls = controls.replace('@APPLY_SEQUENCER@', extract_block(configurator, 'static void apply_sequencer_settings('))
         controls = controls.replace('@BUILD_CONFIG@', extract_block(configurator, 'static bool build_config_payload('))
         controls = controls.replace('@CONFIG_CONSTANTS@', '\n'.join(line for line in configurator.splitlines() if line.startswith((
           '#define SYSEX_DATA_LEN ', '#define SYSEX_BANK_NAME ',
-          '#define SYSEX_CONFIG_ROLE_OFFSET ', '#define SYSEX_CONFIG_PAYLOAD_LEN '))))
+          '#define SYSEX_CONFIG_ROLE_OFFSET ', '#define SYSEX_CONFIG_CV_PPQN_OFFSET ',
+          '#define SYSEX_CONFIG_CV_CLOCK_OFFSET ', '#define SYSEX_CONFIG_OPTIONS_OFFSET ', '#define SYSEX_CONFIG_PAYLOAD_LEN '))))
         controls = controls.replace('@CONTROL_LEDS@', extract_block(configurator, 'static void update_device_control_leds()'))
         controls = controls.replace('@DEFAULT_SETTINGS@', extract_block((root / 'src/settings.cpp').read_text(), 'Settings settings_defaults()'))
+        controls = controls.replace('@LOAD_SETTINGS@', extract_block((root / 'src/settings.cpp').read_text(), 'Settings settings_load()'))
         main_source = (root / 'src/main.cpp').read_text()
         assert 'clock_start();' not in extract_block(main_source, 'void setup()')
+        assert main_source.index('set_external_cv_clock_ppqn(current_settings.cv_clock_ppqn);') < main_source.index('setup_uclock(do_tick);')
         controls = controls.replace('@START_PLAYBACK@', extract_block(main_source, 'static void start_playback_when_ready()'))
         source.write_text(controls)
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', '-I', str(root / 'include'), str(source), '-o', str(executable)], check=True)
         subprocess.run([str(executable)], check=True)
+        subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', '-DTEST_NO_CV_CLOCK', '-I', str(root / 'include'), str(source), '-o', str(executable)], check=True)
+        subprocess.run([str(executable)], check=True)
         print('PASS: startup switch readiness, immediate knob response, switch roles, sparse banks, failed confirmation, LED ownership and persistence')
+        sequence_header = (root.parent / 'my_libraries/seqlib/include/sequencer/Euclidian/Sequencer.h').read_text()
+        seed_methods = '\n'.join(extract_block(sequence_header, anchor) for anchor in (
+          'void set_seed_identity(', 'bool is_add_identity_enabled(', 'void set_add_identity_enabled(',
+          'bool is_add_phrase_enabled(', 'void set_add_phrase_enabled(',
+          'bool is_euclidian_seed_lock(', 'void set_euclidian_seed_lock(',
+          'int get_euclidian_seed(', 'void set_euclidian_seed('))
+        source.write_text(SEED_HARNESS.replace('@SEED_METHODS@', seed_methods))
+        subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', str(source), '-o', str(executable)], check=True)
+        subprocess.run([str(executable)], check=True)
+        print('PASS: optional identity seed, phrase progression, seed lock and overflow-safe seed setter')
         parameter_root = root.parent / 'my_libraries/parameters/include/parameters'
         parameter_header = (parameter_root / 'Parameter.h').read_text().split('class DataParameterBase :', 1)[1]
         mixer = MIXER_STARTUP_HARNESS.replace('@LAST_GETTER@', next(
