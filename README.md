@@ -253,6 +253,7 @@ Sequencer and clock options also in Settings tab (TODO: complete documentation)
 - add more default patterns than four-on-floor that can be chosen somehow (eg breakbeat patterns)
 - allow multiple samples to be assigned to same midi note -> round robin / random
 - i also have some code for generating scale-quantised bassline patterns based on the generated euclidian patterns if that would be interesting to anyone
+- USB host so that drum machines or other external deices can be driven by it.
 
 open to collaboration and welcome feedback 🙂
 
