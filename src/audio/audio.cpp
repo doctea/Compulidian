@@ -1,6 +1,8 @@
 #include "Config.h"
 
 #include "audio/audio.h"
+#include "audio/bank_manager.h"
+#include "audio/sample_store.h"
 //#include "computer.h"
 
 BaseSampleData **sample_data = nullptr;
@@ -8,6 +10,8 @@ BaseSampleData **sample_data = nullptr;
 #include <atomic>
 
 extern std::atomic<bool> started;
+
+std::atomic<bool> g_usbmidi_tx_busy{false};
 
 /* sample player stuff starts */
 
@@ -104,16 +108,15 @@ int NUM_VOICES = sizeof(voice)/sizeof(voice[0]); // number of voices in the syst
 #include "audio/samps.h"
 
 void setup_samples() {
-    // allocate space for the pointers to sample data objects
-    sample_data = (BaseSampleData**)calloc(NUM_SAMPLES, sizeof(BaseSampleData*));
+    // Phase B: scan the content-addressed sample store index first (read-only)
+    // so BankManager can resolve bank config sample_id references against it
+    // - see audio/sample_store.h.
+    sampleStore.setup();
 
-    for (int i = 0; i < NUM_VOICES; i++) { // silence all voices by setting sampleindex to last sample
-        voice[i].sampleindex=sample[voice[i].sample].samplesize<<12; // sampleindex is a 20:12 fixed point number
-        voice[i].level=sample[voice[i].sample].play_volume / 8; // set the level to the sample level
-
-        // set the sample_data array up to point to a SampleData wrapper object
-        sample_data[voice[i].sample] = new SampleDataArray(sample[voice[i].sample].samplearray, sample[voice[i].sample].samplesize);
-    }
+    // All bank detection, sample_data allocation, and compiled-in/bank
+    // config loading is handled by BankManager. It reads Settings::active_bank
+    // from flash and loads the appropriate bank automatically.
+    bankManager.setup();
 }
 
 SamplePlayer sw;
@@ -126,6 +129,9 @@ void setup1()
   delay(500);
   Serial.println(F("setup1 started!"));
 
+  #ifndef COMPULIDIAN_DISABLE_NORMALISATION_PROBE
+    sw.EnableNormalisationProbe();
+  #endif
   sw.Run();
 }
 

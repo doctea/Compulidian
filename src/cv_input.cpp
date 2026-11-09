@@ -29,6 +29,10 @@ extern WorkshopOutputWrapper output_wrapper;
 #include "sequencer/sequencing.h"
 #include "sequencer/Euclidian/Sequencer.h"
 
+#ifdef ENABLE_SHUFFLE
+    #include "sequencer/shuffle.h"
+#endif
+
 //#include "Wire.h"
 bool cv_input_enabled = true;
 
@@ -54,6 +58,19 @@ void setup_cv_input() {
 }
 
 #include "audio/audio.h"
+#include "device_controls.h"
+
+class ControlKnobVoltageSource : public ComputerCardVoltageSource {
+public:
+    ControlKnobVoltageSource(int slot, ComputerCard *card, byte channel)
+        : ComputerCardVoltageSource(slot, card, channel, 5.0, false) {}
+
+    float adcread_to_voltage(int16_t reading) override {
+        const uint16_t filtered = channel == 0 ? device_controls.filter_main(reading)
+            : device_controls.filter_x(reading);
+        return ComputerCardVoltageSource::adcread_to_voltage(filtered);
+    }
+};
 
 // initialise the input voltage ParameterInputs that can be mapped to Parameters
 FLASHMEM 
@@ -63,11 +80,11 @@ void setup_parameter_inputs() {
     //Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
     tft_print("..setup_parameter_inputs...");
 
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(0, &sw, 0, 5.0, false));    // main knob
+    parameter_manager->addVoltageSource(new ControlKnobVoltageSource(0, &sw, 0));    // main knob
     //parameter_manager->voltage_sources->tail()->debug = true;
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(1, &sw, 4, 5.0, false));    // cv1
     //parameter_manager->voltage_sources->tail()->debug = true;
-    parameter_manager->addVoltageSource(new ComputerCardVoltageSource(2, &sw, 1, 5.0, false));    // knob x
+    parameter_manager->addVoltageSource(new ControlKnobVoltageSource(2, &sw, 1));    // knob x
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(3, &sw, 5, 5.0, false));    // cv2
     parameter_manager->addVoltageSource(new ComputerCardVoltageSource(4, &sw, 2, 5.0, false));    // knob y
     //parameter_manager->voltage_sources->tail()->debug = true;
@@ -99,35 +116,22 @@ void setup_parameter_inputs() {
         true,
         //-0.4, // under 0.4, switch is HELD
         0.0003,
-        [=](bool state) -> void { 
-            if (Serial) Serial.printf("Hold switch %s\n", state ? "ON - disabling on-phrase changes" : "OFF - enabling on-phrase changes"); 
-            if (!state) {
-                if (Serial) Serial.printf("Hold switch going OFF - seed was %u\n", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
-            }
-            ((EuclidianSequencer*)sequencer)->set_euclidian_seed_lock(state);
-            if (Serial) Serial.printf("Euclidian seed lock is now %s, seed is now %u\n", ((EuclidianSequencer*)sequencer)->is_euclidian_seed_lock() ? "ON" : "OFF", ((EuclidianSequencer*)sequencer)->get_euclidian_seed());
-        }
+        [](bool) {}
     ); 
     //vpi_hold_switch->debug = true;
     ThresholdToggleParameterInput *vpi_mome_switch = new ThresholdToggleParameterInput(
-        (char*)"Switch", "CV Inputs",  parameter_manager
-        ->voltage_sources->get(5), 
+        (char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 
         0.000005, 
         UNIPOLAR, 
         true, 
         //0.7, // over 0.7, switch is MOMENTARY
         -0.00005,
-        [=](bool state) -> void { 
-            //if (Serial) Serial.printf("Momentary switch %s\n", state ? "ON" : "OFF");
-            output_wrapper.set_muted(state);
-        }
+        [](bool) {}
     ); 
     //vpi_mome_switch->debug = true;
     
-    #ifdef ENABLE_SHUFFLE
-        VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
-        VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
-    #endif
+    VoltageParameterInput *vpi_audio_in_1 = new VoltageParameterInput((char*)"Audio In 1", "CV Inputs", parameter_manager->voltage_sources->get(6), 0.005, BIPOLAR, true);  
+    VoltageParameterInput *vpi_audio_in_2 = new VoltageParameterInput((char*)"Audio In 2", "CV Inputs", parameter_manager->voltage_sources->get(7), 0.005, BIPOLAR, true);
 
     //parameter_manager->voltage_sources->get(0)->debug = true;
 
@@ -147,10 +151,8 @@ void setup_parameter_inputs() {
     parameter_manager->addInput(vpi_knob_y);
     parameter_manager->addInput(vpi_hold_switch);
     parameter_manager->addInput(vpi_mome_switch);
-    #ifdef ENABLE_SHUFFLE
-        parameter_manager->addInput(vpi_audio_in_1);
-        parameter_manager->addInput(vpi_audio_in_2);
-    #endif
+    parameter_manager->addInput(vpi_audio_in_1);
+    parameter_manager->addInput(vpi_audio_in_2);
 
     /*VirtualParameterInput *virtpi1 = new VirtualParameterInput((char*)"LFO sync", "LFOs", LFO_LOCKED);
     VirtualParameterInput *virtpi2 = new VirtualParameterInput((char*)"LFO free", "LFOs", LFO_FREE);
@@ -165,15 +167,16 @@ void setup_parameter_inputs() {
     Serial.println("just did do setDefaultParameterConnections().."); Serial.flush();
     */
 
-    int parameter_index = 0;
     #ifdef ENABLE_SHUFFLE
-        //FloatParameter *shuffle_amount_parameter = sequencer->getParameters()->get(parameter_index);
-        FloatParameter *shuffle_amount_parameter = sequencer->getParameterByName("Shuffle amount 0");   // untested
+        FloatParameter *shuffle_amount_parameter = shuffle_pattern_wrapper.getParameters()->getByName("Shuffle amount 0");
         if (shuffle_amount_parameter==nullptr) {
             Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
         } else {
+            // shuffle_amount_parameter->updateValueFromNormal(0.2f);
+            sequencer->set_shuffle_enabled(true);
+            shuffle_pattern_wrapper[0]->set_amount(0.0f);
+            shuffle_amount_parameter->updateValueFromNormal(0.5f);
             shuffle_amount_parameter->set_slot_x_all(0, vpi_audio_in_1, 1.0f, MOD_SLOT_BI_NATIVE);
-            parameter_index++;
         }
     #endif
 
@@ -190,7 +193,7 @@ void setup_parameter_inputs() {
     euclidian_density_2->set_slot_x_all(1, vpi_cv_2, 1.0f, MOD_SLOT_BI_NATIVE);
 
     /*
-    FloatParameter *mutation_amount = sequencer->getParameters()->get(NUM_GLOBAL_DENSITY_CHANNELS);
+    FloatParameter *mutation_amount = sequencer->getParameterByName("Mutation amount 0");
     //mutation_amount->debug = true;
     mutation_amount->set_slot_0_input(vpi_knob_y);
     mutation_amount->set_slot_0_amount(1.0f);
@@ -211,15 +214,6 @@ void setup_parameter_inputs() {
     bpm_parameter->set_slot_x_all(0, vpi_knob_y, 1.0f, UNIPOLAR);
     parameter_manager->addParameter(bpm_parameter);
 
-    /*LDataParameter<float> *pitch_parameter = new LDataParameter<float>(
-        (char*)"Pitch", 
-        [=](float v) -> void {
-            sw.global_pitch = 4096.0 * v;
-            Serial.printf("Got v %f, so global_pitch set to %i\n", v, sw.global_pitch);
-        },
-        [=]() -> float { return sw.global_pitch / 4096; },
-        0.5, 1.5
-    );*/
     LDataParameter<int16_t> *pitch_parameter = new LDataParameter<int16_t>(
         (char*)"Pitch", 
         [=](int16_t v) -> void {
