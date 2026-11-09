@@ -221,20 +221,6 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 	pulse[0] = !gpio_get(PULSE_1_INPUT);
 	pulse[1] = !gpio_get(PULSE_2_INPUT);
 
-	#ifdef ENABLE_CLOCK_INPUT_CV
-		if (!first_run) {
-			if (last_pulse[0] != pulse[0] && pulse[0]) {
-				pulse_0_transitions++;
-				enqueue_cv_clock_event(true);
-			}
-			if (last_pulse[1] != pulse[1] && pulse[1]) {
-				pulse_1_transitions++;
-				enqueue_cv_clock_event(false);
-			}
-		}
-		first_run = false;
-	#endif
-
 	// Set knobs, with ~60Hz LPF
 	int knob = mux_state;
 
@@ -298,6 +284,20 @@ void __not_in_flash_func(ComputerCard::BufferFull)()
 		if (Disconnected(Input::Pulse2)) pulse[1] = 0;
 	}
 	
+	#ifdef ENABLE_CLOCK_INPUT_CV
+		if (!first_run) {
+			if (last_pulse[0] != pulse[0] && pulse[0]) {
+				pulse_0_transitions++;
+				enqueue_cv_clock_event(true);
+			}
+			if (last_pulse[1] != pulse[1] && pulse[1]) {
+				pulse_1_transitions++;
+				enqueue_cv_clock_event(false);
+			}
+		}
+		first_run = false;
+	#endif
+
 	////////////////////////////////////////
 	// Run the DSP
 	ProcessSample();
