@@ -8,3 +8,4 @@ include/__version.h
 */venv/
 *__pycache__*
 *.pyc
+firmware/checkpoints
