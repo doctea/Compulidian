@@ -5,6 +5,7 @@
 // Magic number written at the start of a valid settings block.
 #define SETTINGS_MAGIC   0x43535447u  // "CSTG"
 #define SETTINGS_VERSION 1u
+#define EXTENDED_SETTINGS_VERSION 2u
 
 // Settings are stored in the first 256 bytes of the settings flash sector.
 // The rest of the 4 KB sector is left as 0xFF (erased flash).
@@ -29,6 +30,12 @@ enum InputRole : uint8_t {
     INPUT_ROLE_DENSITY = 2,  // modulate pattern density / fill amount
     INPUT_ROLE_PITCH   = 3,  // global sample pitch offset
     INPUT_ROLE_BANK    = 4,  // select sample bank (quantised to integer banks)
+};
+
+enum CvResetMode : uint8_t {
+    CV_RESET_RESYNC = 0,
+    CV_RESET_RESTART_SONG = 1,
+    CV_RESET_NEXT_PHRASE = 2,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,7 +84,7 @@ struct Settings {
     InputRole   knob_role[3];       // role of Main, X, Y knobs
     uint8_t     extended_settings_version;
     uint8_t     cv_reset_required;
-    uint8_t     cv_reset_song_position;
+    uint8_t     cv_reset_song_position; // CvResetMode; legacy field name and byte offset retained
     uint8_t     fills_enabled;
     uint8_t     mutation_amount;
     uint8_t     reset_before_mutate;
@@ -108,14 +115,18 @@ inline bool settings_valid_cv_clock_ppqn(uint8_t ppqn) {
 
 inline void settings_normalize_extended(Settings &settings) {
     const Settings defaults = settings_defaults();
-    const bool legacy = settings.extended_settings_version != 1;
+    const uint8_t previous_extended_version = settings.extended_settings_version;
+    const bool legacy = previous_extended_version != 1
+        && previous_extended_version != EXTENDED_SETTINGS_VERSION;
     if (legacy || settings.cv_reset_required > 1) settings.cv_reset_required = defaults.cv_reset_required;
-    if (legacy || settings.cv_reset_song_position > 1) settings.cv_reset_song_position = defaults.cv_reset_song_position;
+    if (legacy || previous_extended_version == 1
+        || settings.cv_reset_song_position > CV_RESET_NEXT_PHRASE)
+        settings.cv_reset_song_position = defaults.cv_reset_song_position;
     if (legacy || settings.fills_enabled > 1) settings.fills_enabled = defaults.fills_enabled;
     if (legacy || settings.mutation_amount > 8) settings.mutation_amount = defaults.mutation_amount;
     if (legacy || settings.reset_before_mutate > 1) settings.reset_before_mutate = defaults.reset_before_mutate;
     if (legacy || settings.add_card_id_to_seed > 1) settings.add_card_id_to_seed = defaults.add_card_id_to_seed;
-    settings.extended_settings_version = 1;
+    settings.extended_settings_version = EXTENDED_SETTINGS_VERSION;
 }
 
 // Reads Settings from flash.  Returns defaults if the magic/version is wrong.

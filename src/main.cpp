@@ -1,6 +1,9 @@
 #include "Config.h"
 
 #include <Arduino.h>
+#include "hardware/clocks.h"
+
+static_assert(SYSTEM_CLOCK_KHZ >= 48000, "SYSTEM_CLOCK_KHZ is in kHz; use (48000*4) for 192 MHz");
 
 #include "sequencer/Euclidian.h"
 
@@ -119,6 +122,7 @@ void global_on_restart() {
 
   //Serial.println(F("on_restart()==>"));
   clock_reset();
+  if (sequencer) sequencer->restart_progression();
   last_processed_tick = -1;
   //Serial.println(F("<==on_restart()"));
 }
@@ -144,13 +148,17 @@ void global_on_restart() {
 #ifdef ENABLE_CLOCK_INPUT_CV
   static void process_cv_clock_event(bool reset, uint32_t observed_at_us) {
     if (reset) {
-      const uint32_t position = current_settings.cv_reset_song_position ? 0
-          : ((ticks + 1) / TICKS_PER_PHRASE) * TICKS_PER_PHRASE;
       ATOMIC_BLOCK(SA_ATOMIC_RESTORESTATE) {
         if (clock_mode != CLOCK_EXTERNAL_CV) change_clock_mode(CLOCK_EXTERNAL_CV);
         sequencer->release_outputs();
         if (!playing) clock_start();
-        clock_reset_to_position(position);
+        auto* euclidian = static_cast<EuclidianSequencer*>(sequencer);
+        if (current_settings.cv_reset_song_position != CV_RESET_RESYNC) {
+            const uint32_t next_phrase = current_settings.cv_reset_song_position == CV_RESET_NEXT_PHRASE
+              ? euclidian->get_progression_tick() / TICKS_PER_PHRASE + 1 : 0;
+          euclidian->restart_progression(next_phrase * TICKS_PER_PHRASE);
+        }
+        clock_reset_to_position(0);
         waiting_for_external_clock = true;
         last_processed_tick = -1;
         output_processing_pending = false;
@@ -176,8 +184,7 @@ void pc_usb_midi_handle_note_off(uint8_t channel, uint8_t note, uint8_t velocity
 
 void setup() {
 
-  // set_sys_clock_khz(150000, true);
-  set_sys_clock_khz(180000, true);
+  const bool system_clock_configured = set_sys_clock_khz(SYSTEM_CLOCK_KHZ, false);
 
   #ifdef USE_TINYUSB
     usb_midi_tx_queue.begin();
@@ -185,6 +192,11 @@ void setup() {
     setup_usb();
     setup_midi();
   #endif
+
+  if (Serial && !system_clock_configured) {
+    Serial.printf("System clock request failed: requested=%lu kHz actual=%lu kHz\n",
+        (unsigned long)SYSTEM_CLOCK_KHZ, (unsigned long)(clock_get_hz(clk_sys) / 1000));
+  }
 
   //if (Serial) { Serial.println(F("done setup_serial; now gonna SetupComputerIO()")); Serial.flush(); }
   //SetupComputerIO();
@@ -227,6 +239,7 @@ void setup() {
     //Serial.println("setting up sequencer..");
     output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
     sequencer = new EuclidianSequencer(output_processor->nodes, output_processor->nodes->size(), NUM_GLOBAL_DENSITY_GROUPS);
+    sequencer->restart_progression();
     sequencer->debug = true;
     output_processor->configure_sequencer(sequencer);
     ((EuclidianSequencer*)sequencer)->initialise_patterns();

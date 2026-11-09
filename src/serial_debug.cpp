@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
+#include "hardware/clocks.h"
 
 #ifdef ENABLE_LITTLEFS
   #include "live_settings.h"
@@ -238,6 +239,10 @@ volatile uint32_t pulse_1_transitions = 0;
               (unsigned long)sw.audio_callback_count, (unsigned long)sw.audio_buffer_count,
               (int)sw.read_buffer_id, (int)sw.write_buffer_id, (unsigned)sw.bufferIndex,
               (int)sw.global_pitch, sw.enable_volume ? "on" : "off");
+                if (Serial) Serial.printf("Timing: sys_khz=%lu adc_divider=%u hardware_hz=%.2f playback_hz=%.2f samples=%lu\n",
+                  (unsigned long)(clock_get_hz(clk_sys) / 1000), (unsigned)COMPUTERCARD_ADC_DIVIDER,
+                  48000000.0 / (8.0 * (COMPUTERCARD_ADC_DIVIDER + 1)),
+                  (double)COMPULIDIAN_PLAYBACK_RATE_HZ, (unsigned long)sw.playback_sample_count);
           }
         } else if (serial_input_buffer[0]=='p') {  // trigger named pattern
           Serial.println(F("p command received!"));

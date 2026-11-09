@@ -10,6 +10,20 @@ in the development cycle.
 More information about PlatformIO Unit Testing:
 - https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
 
+Native ComputerCard and audio integration checks:
+
+	python3 test/test_computercard.py
+	python3 test/test_cv_clock_input.py
+	python3 test/test_web_bank_management.py
+
+The first test compiles and links the entire driver, not just extracted methods,
+with declaration-only consumers and SDK stubs. It checks the upstream reference
+hash, divider default/overrides, worker hook, startup readiness, EEPROM-less
+fallback, and IRQ cleanup. The other tests cover normalisation-safe clock
+capture/diagnostics and sample buffers/fades in both refill modes. Hardware
+timing and the initial 48 kHz trial still require device testing; see
+ComputerCard-notes.md for the retained differences and acceptance checklist.
+
 Native USB MIDI regression checks (Python 3 and g++ or clang++; use WSL):
 
 	python3 test/test_usb_midi_tx.py

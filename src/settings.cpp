@@ -27,9 +27,9 @@ Settings settings_defaults() {
     s.version = SETTINGS_VERSION;
     s.active_bank = 0; // compiled-in bank
     s.cv_clock_ppqn = 1;
-    s.extended_settings_version = 1;
+    s.extended_settings_version = EXTENDED_SETTINGS_VERSION;
     s.cv_reset_required = 1;
-    s.cv_reset_song_position = 1;
+    s.cv_reset_song_position = CV_RESET_RESYNC;
     s.fills_enabled = 1;
     s.mutation_amount = 3;
     s.reset_before_mutate = 1;

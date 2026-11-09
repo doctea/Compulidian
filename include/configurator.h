@@ -884,7 +884,7 @@ static void handle_set_config_(uint8_t req_id, const uint8_t *data, unsigned len
     }
     if (length >= 28) {
         for (unsigned index = 0; index < 6; ++index) {
-            if (data[22 + index] > (index == 3 ? 8 : 1)) {
+            if (data[22 + index] > (index == 3 ? 8 : index == 1 ? CV_RESET_NEXT_PHRASE : 1)) {
                 enqueue_pending_sysex(PENDING_SEND_NACK, req_id, SYSEX_NACK_INVALID_VALUE);
                 return;
             }
@@ -919,7 +919,7 @@ static void handle_set_config_(uint8_t req_id, const uint8_t *data, unsigned len
         #endif
     }
     if (length >= 28) {
-        current_settings.extended_settings_version = 1;
+        current_settings.extended_settings_version = EXTENDED_SETTINGS_VERSION;
         current_settings.cv_reset_required = data[22];
         current_settings.cv_reset_song_position = data[23];
         current_settings.fills_enabled = data[24];

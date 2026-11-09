@@ -1825,7 +1825,7 @@ function decodeClockStatus(payload) {
   const status = {
     version: payload[0], cvEnabled: !!payload[1], source: payload[2], playing: !!payload[3],
     waiting: !!payload[4], strict: !!payload[5], stalled: !!payload[6], engineState: payload[7],
-    cvPPQN: payload[8], resetRequired: !!payload[9], resetSongPosition: !!payload[10],
+    cvPPQN: payload[8], resetRequired: !!payload[9], resetMode: payload[10],
     fills: !!payload[11], mutationAmount: payload[12], resetBeforeMutation: !!payload[13], seedCardId: !!payload[14]
   };
   CLOCK_STATUS_FIELDS.forEach((name, index) => {
@@ -2656,8 +2656,9 @@ function buildSettingsRequest(persist) {
     if (data.length < 22) data.push(currentCfg[148]);
     extendedSettingIds().forEach((id, index) => {
       const control = document.getElementById(id);
+      const value = index === 1 || index === 3 ? Number(control.value) : Number(control.checked);
       data.push(index < 2 && !(currentCfg[149] & 1) ? currentCfg[150 + index]
-        : index === 3 ? Number(control.value) : Number(control.checked));
+        : value);
     });
   }
   return data;
@@ -2797,8 +2798,8 @@ function applyCfgToUI(d) {
   extendedSettingIds().forEach((id, index) => {
     const control = document.getElementById(id);
     control.disabled = d.length < 156 || (index < 2 && !(d[149] & 1));
-    const value = d.length >= 156 ? d[150 + index] : [1, 1, 1, 3, 1, 0][index];
-    if (index === 3) control.value = value;
+    const value = d.length >= 156 ? d[150 + index] : [1, 0, 1, 3, 1, 0][index];
+    if (index === 1 || index === 3) control.value = value;
     else control.checked = value !== 0;
     control.title = d.length < 156 ? 'Update firmware to configure this setting' : '';
   });

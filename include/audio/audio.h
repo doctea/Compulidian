@@ -21,7 +21,12 @@ extern voice_t voice[];
 void setup_samples();
 
 #include "ComputerCard.h"
+#include "cv_clock_input.h"
 #include <cmath>
+
+#ifndef COMPULIDIAN_PLAYBACK_RATE_HZ
+#define COMPULIDIAN_PLAYBACK_RATE_HZ (6000000.0 / 249.0)
+#endif
 
 class SamplePlayer : public ComputerCard
 {
@@ -36,6 +41,23 @@ public:
 
     volatile uint32_t audio_callback_count = 0;
     volatile uint32_t audio_buffer_count = 0;
+    volatile uint32_t playback_sample_count = 0;
+    static constexpr uint32_t PLAYBACK_PHASE_ONE = 1u << 24;
+    static constexpr double PLAYBACK_SAMPLES_PER_CALLBACK =
+        COMPULIDIAN_PLAYBACK_RATE_HZ * (8.0 * (COMPUTERCARD_ADC_DIVIDER + 1)) / 48000000.0;
+    static_assert(COMPULIDIAN_PLAYBACK_RATE_HZ > 0 && COMPULIDIAN_PLAYBACK_RATE_HZ <= 96000,
+        "unsupported playback rate");
+    static_assert(PLAYBACK_SAMPLES_PER_CALLBACK <= 8,
+        "playback rate exceeds eight samples per ADC callback");
+    static constexpr uint32_t PLAYBACK_PHASE_INCREMENT =
+        static_cast<uint32_t>(PLAYBACK_SAMPLES_PER_CALLBACK * PLAYBACK_PHASE_ONE + 0.5);
+    static_assert(PLAYBACK_PHASE_INCREMENT > 0, "playback rate is too low");
+    uint32_t playback_phase = 0;
+    int32_t previous_playback_output = 0;
+    int32_t playback_output = 0;
+#ifdef ENABLE_CLOCK_INPUT_CV
+    bool cv_clock_started = false;
+#endif
 
     volatile int global_pitch = 2048; // default to normal pitch
 
@@ -149,7 +171,32 @@ public:
 
     virtual void __not_in_flash_func(ProcessSample)()
 	{       
+#ifdef ENABLE_CLOCK_INPUT_CV
+        if (cv_clock_started)
+            capture_cv_clock_edges(PulseIn1RisingEdge(), PulseIn2RisingEdge());
+        cv_clock_started = true;
+#endif
         ++audio_callback_count;
+
+        if (PLAYBACK_PHASE_INCREMENT == PLAYBACK_PHASE_ONE) {
+            AudioOut1(ProcessPlaybackSample());
+            return;
+        }
+
+        playback_phase += PLAYBACK_PHASE_INCREMENT;
+        while (playback_phase >= PLAYBACK_PHASE_ONE) {
+            playback_phase -= PLAYBACK_PHASE_ONE;
+            previous_playback_output = playback_output;
+            playback_output = ProcessPlaybackSample();
+        }
+        const int32_t interpolated_output = previous_playback_output
+            + (((playback_output - previous_playback_output)
+                * static_cast<int32_t>(playback_phase >> 9)) >> 15);
+        AudioOut1(output_gain_q15 == 0 ? 0 : interpolated_output);
+    }
+
+    int32_t __not_in_flash_func(ProcessPlaybackSample)() {
+        ++playback_sample_count;
 
         if (bank_transition_state == BANK_TRANSITION_BUFFER_READY
             && bufferIndex == 0
@@ -183,14 +230,14 @@ public:
         }
 
         const int32_t mixed_sample = buffer[read_buffer_id][bufferIndex];
-		AudioOut1((mixed_sample * (int32_t)output_gain_q15) >> 15);
-		// AudioOut2(buffer[read_buffer_id][bufferIndex]);
+        const int32_t output = (mixed_sample * (int32_t)output_gain_q15) >> 15;
 
         bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
         if (bufferIndex == 0) {
             bufferReady[read_buffer_id] = true;
             read_buffer_id = (read_buffer_id + 1) % 2;
         }
+        return output;
     }
 
 };

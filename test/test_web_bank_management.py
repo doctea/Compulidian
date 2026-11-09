@@ -13,7 +13,6 @@ CPP_HARNESS = r"""
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <vector>
@@ -228,6 +227,12 @@ AUDIO_HARNESS = r"""
 #define IN_MAIN_LOOP 2
 #define CALCULATE_SAMPLES_MODE IN_MAIN_LOOP
 #define DEFAULT_INTERPOLATION_ENABLED false
+#ifndef COMPUTERCARD_ADC_DIVIDER
+#define COMPUTERCARD_ADC_DIVIDER 248
+#endif
+#ifndef COMPULIDIAN_PLAYBACK_RATE_HZ
+#define COMPULIDIAN_PLAYBACK_RATE_HZ (6000000.0 / 249.0)
+#endif
 constexpr int NUM_VOICES = 1;
 struct Voice { int sample = 0; uint32_t sampleindex = 0; } voice[1];
 struct Sample { int play_volume = 127; } sample[1];
@@ -257,6 +262,7 @@ int main() {
   assert(player.audio_buffer_count == 1);
   for (int index = 0; index < 127; ++index) player.ProcessSample();
   assert(player.audio_callback_count == 128);
+  assert(player.playback_sample_count == 128);
   assert(player.read_buffer_id == 0);
   player.CalculateSamples();
   assert(player.audio_buffer_count == 2);
@@ -265,6 +271,14 @@ int main() {
   player.CalculateSamples();
   assert(player.audio_buffer_count == 3);
   assert(player.buffer[0][0] == 0);
+
+  SamplePlayer workerPlayer;
+  workerPlayer.read_buffer_id = 1;
+  workerPlayer.AudioWorkerLoop();
+  assert(workerPlayer.audio_buffer_count == 0);
+  workerPlayer.calculate_mode = IN_AUDIO_WORKER;
+  workerPlayer.AudioWorkerLoop();
+  assert(workerPlayer.audio_buffer_count == 1);
 
   SamplePlayer transitionPlayer;
   for (int index = 0; index < SamplePlayer::BUFFER_SIZE; ++index)
@@ -308,6 +322,76 @@ int main() {
     previous_gain = repeatedTransitionPlayer.output_gain_q15;
   }
   assert(repeatedTransitionPlayer.bank_transition_is_silent());
+}
+"""
+
+
+PLAYBACK_RATE_HARNESS = r"""
+int main() {
+  SamplePlayer player;
+  for (int page = 0; page < 2; ++page)
+    for (int index = 0; index < SamplePlayer::BUFFER_SIZE; ++index)
+      player.buffer[page][index] = (index & 1) ? 32767 : -32767;
+  constexpr uint32_t callbacks = 48000;
+  for (uint32_t count = 0; count < callbacks; ++count) {
+    player.ProcessSample();
+    assert(player.last_output >= -32767 && player.last_output <= 32767);
+  }
+  const double expected = callbacks * COMPULIDIAN_PLAYBACK_RATE_HZ
+      * (8.0 * (COMPUTERCARD_ADC_DIVIDER + 1)) / 48000000.0;
+  assert(player.playback_sample_count >= expected - 1);
+  assert(player.playback_sample_count <= expected + 1);
+  assert(player.audio_callback_count == callbacks);
+  assert(player.bufferIndex == player.playback_sample_count % SamplePlayer::BUFFER_SIZE);
+  assert(static_cast<uint32_t>(player.read_buffer_id)
+      == (player.playback_sample_count / SamplePlayer::BUFFER_SIZE) % 2);
+
+  SamplePlayer ramp;
+  for (int page = 0; page < 2; ++page)
+    for (int index = 0; index < SamplePlayer::BUFFER_SIZE; ++index)
+      ramp.buffer[page][index] = (page * SamplePlayer::BUFFER_SIZE + index) * 100;
+  for (int count = 0; count < 10; ++count) {
+    ramp.ProcessSample();
+    const uint64_t phase = uint64_t(count + 1) * SamplePlayer::PLAYBACK_PHASE_INCREMENT;
+    const uint32_t consumed = phase / SamplePlayer::PLAYBACK_PHASE_ONE;
+    const uint32_t fraction = (phase % SamplePlayer::PLAYBACK_PHASE_ONE) >> 9;
+    const int expected_output = consumed == 0 ? 0
+        : SamplePlayer::PLAYBACK_PHASE_INCREMENT == SamplePlayer::PLAYBACK_PHASE_ONE
+        ? (consumed - 1) * 100
+        : (consumed >= 2 ? (consumed - 2) * 100 : 0)
+            + (consumed >= 2 ? ((100 * fraction) >> 15) : 0);
+    assert(ramp.last_output == expected_output);
+  }
+
+  SamplePlayer transition;
+  for (int page = 0; page < 2; ++page)
+    for (int index = 0; index < SamplePlayer::BUFFER_SIZE; ++index)
+      transition.buffer[page][index] = 16000;
+  transition.begin_bank_transition();
+  while (!transition.bank_transition_is_silent()) {
+    transition.ProcessSample();
+    assert(transition.audio_callback_count < 1000);
+    assert(transition.last_output >= 0 && transition.last_output <= 16000);
+  }
+  assert(transition.last_output == 0);
+  assert(transition.playback_sample_count >= SamplePlayer::BANK_TRANSITION_FADE_SAMPLES);
+  const uint32_t faded_callbacks = transition.audio_callback_count;
+  const double expected_callbacks = SamplePlayer::BANK_TRANSITION_FADE_SAMPLES
+      / SamplePlayer::PLAYBACK_SAMPLES_PER_CALLBACK;
+  assert(faded_callbacks >= expected_callbacks - 1 && faded_callbacks <= expected_callbacks + 1);
+  for (int count = 0; count < 10; ++count) {
+    transition.ProcessSample();
+    assert(transition.last_output == 0);
+  }
+  transition.finish_bank_transition();
+  transition.bank_transition_buffer_id = transition.read_buffer_id;
+  transition.bank_transition_state = SamplePlayer::BANK_TRANSITION_BUFFER_READY;
+  while (transition.bank_transition_state != SamplePlayer::BANK_TRANSITION_IDLE) {
+    transition.ProcessSample();
+    assert(transition.audio_callback_count < 2000);
+    assert(transition.last_output >= 0 && transition.last_output <= 16000);
+  }
+  assert(transition.output_gain_q15 == SamplePlayer::OUTPUT_GAIN_ONE_Q15);
 }
 """
 
@@ -509,7 +593,7 @@ for (const anchor of [
   context.applyCfgToUI(context.currentCfg);
   assert.equal(element('cfg-reset-required').disabled, true);
   assert.equal(element('cfg-fills').disabled, false);
-  assert.equal(element('cfg-reset-song').checked, true);
+  assert.equal(element('cfg-reset-song').value, 1);
   assert.equal(element('cfg-mutation-amount').value, 3);
   element('cfg-fills').checked = false;
   element('cfg-mutation-amount').value = '8';
@@ -521,10 +605,17 @@ for (const anchor of [
   context.applyCfgToUI(context.currentCfg);
   assert.equal(element('cfg-reset-required').disabled, false);
   element('cfg-reset-required').checked = false;
-  element('cfg-reset-song').checked = false;
+  element('cfg-reset-song').value = '0';
   await context.saveConfig();
   assert.equal(configSent.length, 28);
   assert.deepEqual(configSent.slice(22), [0, 0, 1, 3, 1, 0]);
+  for (const mode of [0, 1, 2]) {
+    element('cfg-reset-song').value = String(mode);
+    assert.equal(context.buildSettingsRequest(0)[23], mode);
+  }
+  context.currentCfg[151] = 2;
+  context.applyCfgToUI(context.currentCfg);
+  assert.equal(element('cfg-reset-song').value, 2);
   let bankReads = 0;
   context.loadedForSlot = 1;
   context.bankDirty = true;
@@ -638,7 +729,7 @@ for (const anchor of [
   assert.equal(context.sampleMetaDirty, false);
   assert.equal(context.sampleMetaBusy, false);
   console.log('PASS: sample-tag refresh preservation, failed-save recovery and in-flight edit protection');
-  const clockPayload = [1, 1, 2, 1, 0, 1, 0, 2, 24, 0, 0, 1, 3, 1, 1];
+  const clockPayload = [1, 1, 2, 1, 0, 1, 0, 2, 24, 0, 2, 1, 3, 1, 1];
   const values = [1234, 120000, 119500, 987654, 0xffffffff, 99, 2, 3, 400, 0xffffffff,
     10000, 9000, 11000, 123, 456, 98, 1, 98, 98, 4, 10000, 400, 0, 0, 24];
   values.forEach(value => { for (let index = 0; index < 5; ++index) clockPayload.push(Math.floor(value / 2 ** (index * 7)) & 127); });
@@ -647,6 +738,7 @@ for (const anchor of [
   assert.equal(clock.setBpm, 120);
   assert.equal(clock.engineBpm, 119.5);
   assert.equal(clock.detectedBpm, 250);
+  assert.equal(clock.resetMode, 2);
   assert.equal(clock.resetAgeUs, 0xffffffff);
   assert.throws(() => context.decodeClockStatus(clockPayload.slice(1)), /Unsupported/);
   const invalidCounter = [...clockPayload]; invalidCounter[19] = 16;
@@ -861,16 +953,26 @@ int main() {
   static_assert(offsetof(Settings, outputs) == 12);
   assert(settings_defaults().momentary_role == MOMENTARY_MUTE);
   assert(settings_defaults().cv_clock_ppqn == 1);
+  assert(settings_defaults().extended_settings_version == EXTENDED_SETTINGS_VERSION);
   static_assert(offsetof(Settings, extended_settings_version) == 33);
   auto extended = settings_defaults();
-  assert(extended.cv_reset_required && extended.cv_reset_song_position && extended.fills_enabled);
+  assert(extended.cv_reset_required && extended.cv_reset_song_position == CV_RESET_RESYNC && extended.fills_enabled);
   assert(extended.mutation_amount == 3 && extended.reset_before_mutate && !extended.add_card_id_to_seed);
   extended.extended_settings_version = 0;
   extended.cv_reset_required = extended.cv_reset_song_position = extended.fills_enabled = 0;
   extended.mutation_amount = extended.reset_before_mutate = 0;
   settings_normalize_extended(extended);
-  assert(extended.cv_reset_required && extended.cv_reset_song_position && extended.fills_enabled);
+  assert(extended.cv_reset_required && extended.cv_reset_song_position == CV_RESET_RESYNC && extended.fills_enabled);
   assert(extended.mutation_amount == 3 && extended.reset_before_mutate);
+  extended = settings_defaults();
+  extended.extended_settings_version = 1;
+  extended.cv_reset_song_position = CV_RESET_RESTART_SONG;
+  extended.fills_enabled = 0;
+  extended.mutation_amount = 7;
+  settings_normalize_extended(extended);
+  assert(extended.cv_reset_song_position == CV_RESET_RESYNC);
+  assert(!extended.fills_enabled && extended.mutation_amount == 7);
+  assert(extended.extended_settings_version == EXTENDED_SETTINGS_VERSION);
   extended.cv_reset_required = extended.cv_reset_song_position = extended.fills_enabled = 0;
   extended.mutation_amount = extended.reset_before_mutate = 0;
   extended.add_card_id_to_seed = 1;
@@ -1103,11 +1205,18 @@ int main() {
   request[27] = 1;
   handle_set_config_(1, request, 28);
   assert(saves == 5 && !current_settings.cv_reset_required && !current_settings.cv_reset_song_position);
+  assert(current_settings.extended_settings_version == EXTENDED_SETTINGS_VERSION);
   assert(!sequence.fills && sequence.mutation == 8 && !sequence.reset_mutation && sequence.identity);
   assert(sequence.identity_value == (0x12345678u ^ 0x87654321u));
+  for (auto mode : {CV_RESET_RESYNC, CV_RESET_RESTART_SONG, CV_RESET_NEXT_PHRASE}) {
+    request[23] = mode;
+    handle_set_config_(1, request, 28);
+    assert(current_settings.cv_reset_song_position == mode && saves == 5);
+  }
+  request[23] = CV_RESET_RESYNC;
   for (int index = 22; index < 28; ++index) {
     const uint8_t previous = request[index];
-    request[index] = index == 25 ? 9 : 2;
+    request[index] = index == 25 ? 9 : index == 23 ? 3 : 2;
     request[0] = 2;
     handle_set_config_(1, request, 28);
     assert(last_response == PENDING_SEND_NACK && bankManager.active_bank() == 4 && saves == 5);
@@ -1147,6 +1256,7 @@ MIXER_STARTUP_HARNESS = r"""
 #include <cassert>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <functional>
 #include <type_traits>
@@ -1198,6 +1308,41 @@ template<class DataType>
 namespace vl { template<class Signature> using Func = std::function<Signature>; }
 template<class DataType = float>
 @LDATA@;
+#define VOLTAGE_SOURCE_DEFAULT_SMOOTHING 1.0f
+uint8_t get_midi_pitch_for_voltage(float) { return 0; }
+@VOLTAGE_SOURCE@;
+enum VALUE_TYPE { UNIPOLAR, BIPOLAR };
+#define Serial_flush() Serial.flush()
+#define Debug_printf(...) Serial.printf(__VA_ARGS__)
+struct CapturedInput {
+  using DataType = float;
+  VoltageSourceBase* voltage_source;
+  float currentValue = 0, lastValue = 0, sensitivity = 0.005f;
+  bool inverted = true, debug = false;
+  VALUE_TYPE input_type = BIPOLAR;
+  const char* name = "Audio In 1";
+  explicit CapturedInput(VoltageSourceBase* source) : voltage_source(source) {}
+  @INPUT_READ@
+  @INPUT_CHANGE@
+  @INPUT_NORMAL@
+};
+constexpr int MAX_SHUFFLE_TEMPLATE_SIZE = 32;
+uint32_t millis() { return 0; }
+struct Clock {
+  int8_t sent[MAX_SHUFFLE_TEMPLATE_SIZE] = {};
+  bool active = false;
+  void setShuffle(bool value, int8_t) { active = value; }
+  bool isShuffled(int8_t) { return active; }
+  void setShuffleTemplate(int8_t* values, int8_t size, int8_t) {
+    std::copy(values, values + size, sent);
+  }
+} uClock;
+@SHUFFLE_WRAPPER@;
+struct ConstantVoltage : VoltageSourceBase {
+  float raw;
+  explicit ConstantVoltage(float raw) : VoltageSourceBase(0, 0.0f, 8.0f), raw(raw) {}
+  float fetch_current_voltage() override { return raw; }
+};
 struct TrackedProxy : ProxyParameter<float> {
   int sends = 0;
   using ProxyParameter<float>::ProxyParameter;
@@ -1218,6 +1363,35 @@ int main() {
   ProxyParameter<int> matching("Rotation", &rotation, &effective_rotation, 1, 16);
   matching.update_mixer();
   assert(rotation == 0 && effective_rotation == 0);
+  for (float initial : {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f}) {
+    ShufflePatternWrapper wrapper(0);
+    struct {
+      ShufflePatternWrapper* wrapper;
+      ShufflePatternWrapper* operator[](unsigned) { return wrapper; }
+    } shuffle_pattern_wrapper{&wrapper};
+    struct Sequence { void set_shuffle_enabled(bool) {} } sequence;
+    auto* sequencer = &sequence;
+    LDataParameter<float> parameter("Shuffle amount 0",
+      [&](float value) { wrapper.set_amount(value); },
+      [&]() { return wrapper.get_amount(); }, -1.0f, 1.0f);
+    auto* shuffle_amount_parameter = &parameter;
+    @SHUFFLE_INITIALISATION@
+    ConstantVoltage source(-initial * 8.0f);
+    CapturedInput input{&source};
+    source.update();
+    input.read();
+    const int8_t steps[] = {0, 12};
+    wrapper.set_steps(steps, 2);
+    parameter.modulation = input.get_normal_value(input.currentValue, BIPOLAR) * 0.5f;
+    parameter.update_mixer();
+    wrapper.update_target();
+    const float expected = parameter.normalToData(constrain(
+      parameter.getCurrentNormalValue() + parameter.modulation, 0.0f, 1.0f));
+    assert(std::fabs(wrapper.get_amount() - expected) < 0.0001f);
+    assert(uClock.active == (expected != 0.0f) && uClock.sent[1] == int8_t(12 * expected));
+    parameter.update_mixer();
+    assert(std::fabs(wrapper.get_amount() - expected) < 0.0001f);
+  }
   for (float knob : {0.0f, 0.5f, 1.0f}) {
     float base = 0.5f, effective = 0.5f;
     TrackedProxy parameter("Density", &base, &effective, 0.0f, 1.0f);
@@ -1244,10 +1418,13 @@ SEED_HARNESS = r"""
 #include <cstdint>
 uint32_t phrase = 3;
 #define BPM_CURRENT_PHRASE phrase
+constexpr uint32_t TICKS_PER_PHRASE = 384;
 struct EuclidianSequencer {
   int seed = 0;
   uint32_t seed_identity = 0;
   bool add_identity_to_seed = false, add_phrase_to_seed = true, seed_locked = false;
+  bool independent_progression = false;
+  uint32_t get_progression_tick() const { return phrase * TICKS_PER_PHRASE; }
   uint32_t last_locked_seed = 0;
   @SEED_METHODS@
 };
@@ -1264,7 +1441,10 @@ int main() {
   sequence.set_euclidian_seed_lock(true);
   phrase = 8;
   sequence.set_seed_identity(200);
-  assert(sequence.get_euclidian_seed() == 12);
+  assert(sequence.get_euclidian_seed() == 112);
+  sequence.set_add_identity_enabled(false);
+  assert(sequence.get_euclidian_seed() == -88);
+  sequence.set_add_identity_enabled(true);
   sequence.set_euclidian_seed_lock(false);
   assert(sequence.get_euclidian_seed() == 116);
   sequence.set_seed_identity(UINT32_MAX);
@@ -1310,6 +1490,23 @@ def main():
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', str(source), '-o', str(executable)], check=True)
         subprocess.run([str(executable)], check=True)
         print('PASS: audio callback/buffer diagnostics and sample generation')
+        rate_harness = AUDIO_HARNESS.split('int main() {', 1)[0] + PLAYBACK_RATE_HARNESS
+        source.write_text(rate_harness.replace('@PLAYER@', extract_block(audio_header, 'class SamplePlayer : public ComputerCard')))
+        rate_flags = [compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                '-fsanitize=undefined', '-fno-sanitize-recover=all']
+        for divider in (124, 248, 249, 496):
+          for rate in (None, 24000, 48000):
+            flags = [f'-DCOMPUTERCARD_ADC_DIVIDER={divider}']
+            if rate is not None:
+              flags.append(f'-DCOMPULIDIAN_PLAYBACK_RATE_HZ={rate}')
+            subprocess.run(rate_flags + flags + [str(source), '-o', str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+        for flags, message in ((['-DCOMPULIDIAN_PLAYBACK_RATE_HZ=0'], 'unsupported playback rate'),
+                     (['-DCOMPULIDIAN_PLAYBACK_RATE_HZ=96001'], 'unsupported playback rate'),
+                     (['-DCOMPUTERCARD_ADC_DIVIDER=65535'], 'eight samples per ADC callback')):
+          result = subprocess.run(rate_flags + flags + ['-fsyntax-only', str(source)], capture_output=True, text=True)
+          assert result.returncode != 0 and message in result.stderr
+        print('PASS: independent playback rate, fractional interpolation, buffer rollover and fade timing across 12 rate/divider combinations (UBSan)')
         controls = CONTROLS_HARNESS.replace('@KNOB_SOURCE@', extract_block((root / 'src/cv_input.cpp').read_text(), 'class ControlKnobVoltageSource'))
         controls = controls.replace('@HANDLE_CONTROLS@', extract_block(configurator, 'static void handle_config_mode()'))
         controls = controls.replace('@SET_CONFIG@', extract_block(configurator, 'static void handle_set_config_('))
@@ -1336,7 +1533,7 @@ def main():
         seed_methods = '\n'.join(extract_block(sequence_header, anchor) for anchor in (
           'void set_seed_identity(', 'bool is_add_identity_enabled(', 'void set_add_identity_enabled(',
           'bool is_add_phrase_enabled(', 'void set_add_phrase_enabled(',
-          'bool is_euclidian_seed_lock(', 'void set_euclidian_seed_lock(',
+          'bool is_euclidian_seed_lock(', 'void set_euclidian_seed_lock(', 'uint32_t get_seed_phrase(',
           'int get_euclidian_seed(', 'void set_euclidian_seed('))
         source.write_text(SEED_HARNESS.replace('@SEED_METHODS@', seed_methods))
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', str(source), '-o', str(executable)], check=True)
@@ -1358,10 +1555,24 @@ def main():
           'virtual DataType constrainDataToRange(')))
         mixer = mixer.replace('@PROXY@', extract_block((parameter_root / 'ProxyParameter.h').read_text(), 'class ProxyParameter :'))
         mixer = mixer.replace('@LDATA@', extract_block(parameter_header, 'class LDataParameter :'))
+        parameter_include = parameter_root.parent
+        mixer = mixer.replace('@VOLTAGE_SOURCE@', extract_block(
+          (parameter_include / 'voltage_sources/VoltageSource.h').read_text(), 'class VoltageSourceBase {'))
+        analog = (parameter_include / 'parameter_inputs/AnalogParameterInputBase.h').read_text()
+        mixer = mixer.replace('@INPUT_READ@', extract_block(
+          (parameter_include / 'parameter_inputs/VoltageParameterInput.h').read_text(), 'virtual void read() override').replace(' override', ''))
+        mixer = mixer.replace('@INPUT_CHANGE@', extract_block(analog, 'virtual bool is_significant_change('))
+        mixer = mixer.replace('@INPUT_NORMAL@', extract_block(analog, 'virtual DataType get_normal_value('))
+        mixer = mixer.replace('@SHUFFLE_WRAPPER@', extract_block(
+          (root.parent / 'my_libraries/seqlib/include/sequencer/shuffle.h').read_text(), 'class ShufflePatternWrapper {'))
+        cv_wiring = (root / 'src/cv_input.cpp').read_text()
+        mixer = mixer.replace('@SHUFFLE_INITIALISATION@', cv_wiring[
+          cv_wiring.index('sequencer->set_shuffle_enabled(true);'):
+          cv_wiring.index('shuffle_amount_parameter->set_slot_x_all(')])
         source.write_text(mixer)
         subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-fsanitize=undefined', '-fno-sanitize-recover=all', str(source), '-o', str(executable)], check=True)
         subprocess.run([str(executable)], check=True)
-        print('PASS: existing settings/pattern values preserved; changed proxies apply zero, centre and maximum without redundant sends')
+        print('PASS: real voltage/input/mixer startup honours zero and nonzero shuffle; knobs apply zero, centre and maximum without redundant sends')
         baseline = mixer.replace('this->lastGetterValue = *source;', 'this->lastGetterValue = 0;')
         baseline = baseline.replace('this->last_sent_value = *target;', 'this->last_sent_value = 0;')
         baseline = baseline.replace('this->initial_output_pending = *source != *target;', 'this->initial_output_pending = false;')

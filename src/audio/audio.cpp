@@ -129,7 +129,9 @@ void setup1()
   delay(500);
   Serial.println(F("setup1 started!"));
 
-  sw.EnableNormalisationProbe();
+  #ifndef COMPULIDIAN_DISABLE_NORMALISATION_PROBE
+    sw.EnableNormalisationProbe();
+  #endif
   sw.Run();
 }
 

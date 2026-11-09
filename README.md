@@ -7,11 +7,35 @@ https://github.com/doctea/Compulidian
 
 Its a platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
 
+The pinned ComputerCard reference, local driver changes, and optional legacy ADC
+divider are documented in [ComputerCard-notes.md](ComputerCard-notes.md).
+
 - Uses my [parameters](https://github.com/doctea/parameters), [midihelpers](https://github.com/doctea/midihelpers) and [seqlib](https://github.com/doctea/seqlib) libraries.
 - Uses (patched) [uClock](https://github.com/midilab/uClock) for clock generation.
 - Sample player adapted from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player).
 
 See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
+
+## Release firmware
+
+In VS Code, run **Tasks: Run Task** and select **Build release firmware**.
+Alternatively, from the project directory:
+
+```sh
+python tools/build_release.py
+```
+
+This builds all three release environments, then copies their UF2 files to:
+
+- `firmware/firmware_rpipico.uf2`
+- `firmware/firmware_rpipico_16mb.uf2`
+- `firmware/firmware_rpipico_16mb_with_cv_clock_input.uf2`
+
+Existing release files are not changed if a build fails or an expected UF2 is
+missing. Nothing is uploaded, and preserved checkpoints are left alone.
+The script finds PlatformIO on PATH or in its standard VS Code installation;
+use `--pio PATH_TO_PLATFORMIO` for a custom installation. Use `python3` instead
+of `python` on systems where required.
 
 ## Basic features
 
@@ -22,7 +46,7 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 - Defaults to a four-on-the-floor style pattern
 - Tracks are split into two groups, each group has its own 'global density' parameter controlled by Main knob and X knob, and modulated via CV1 and CV2.  Go from none to a very hectic number of pulses.
 - Last bar of every 4-bar phrase plays a variation fill.
-- At start of every phrase (4 bars), pattern resets to the default pattern but increases seed by 1 so get a new slight variation.
+- Phrase mutations and fills follow musical progression independently of playback phase, so frequent RESETs do not starve them.
 
 ### CV, Knob and Switch controls
 
@@ -79,19 +103,20 @@ the selected rate is retained when switching clock sources. USB MIDI clock
 always uses 24 PPQN. Use **Save settings** to retain the CV rate after reboot.
 The selector is disabled on older firmware or builds without CV clock input.
 
-Two additional Settings toggles control Pulse 1 RESET behavior:
+Settings control Pulse 1 RESET behavior:
 
 - **RESET required to enter CV clock mode**, default ON: RESET selects CV clock;
   clock pulses alone do not take over from internal or USB MIDI clock. OFF lets
   incoming CV clock pulses select CV mode without a reset.
-- **RESET also rewinds song position / seed**, default ON: RESET returns to
-  phrase zero, restoring the initial phrase-derived seed unless seed lock is held.
-  OFF aligns to the current phrase start without discarding the phrase index or
-  seed progression. At an already-due phrase boundary it uses the next phrase.
-  Both modes release held notes before repositioning. Neither changes the base seed.
+- **RESET mode**, default **Resync**: every mode resets playback phase to zero and
+  releases held notes. Resync preserves musical progression, so fills and phrase
+  mutations continue on schedule even with frequent RESETs. **Next Phrase** also
+  advances progression to the next phrase. **Restart Song** resets progression
+  to phrase zero. Hold freezes only the phrase contribution to the seed; it does
+  not stop fills or progression, and Card ID remains an independent seed input.
 
 RESET also starts playback if stopped or paused; playback waits for the next
-CV clock pulse at the selected phrase position.
+CV clock pulse at playback phase zero.
 
 **Settings > Euclidean** also exposes **Fills enabled** (default ON), **Mutation
 amount** (0-8, default 3), **Reset before mutation** (default ON), and **Add Card
@@ -100,8 +125,9 @@ another phrase offset; phrase progression and seed lock retain their existing
 roles. Changes affect subsequent fills/mutations without restarting playback.
 Reset before mutation restores unlocked pattern defaults before phrase mutations;
 it does not reset transport, phrase position or the seed.
-All six options apply live and are persisted by **Save settings**. Legacy settings
-load with the old behavior; older web clients preserve the new options.
+All six options apply live and are persisted by **Save settings**. Settings from
+the previous development schema migrate their RESET mode to Resync once; other
+valid extended options are retained.
 
 ### Clock Diagnostics
 
@@ -137,8 +163,8 @@ The serial `clock-state` command prints the same categories. Serial
 Protocol v2 request `0x1B` has no payload; its queued `0x47` response carries a
 version-1, 140-byte payload. Header bytes 0-14 are: version, CV capability, source
 (0 internal, 1 USB MIDI, 2 CV, 3 other), playing, waiting, strict, stalled, engine
-state, configured CV PPQN, reset-required, reset-song-position, fills, mutation
-amount, reset-before-mutation, Card-ID seed enabled.
+state, configured CV PPQN, reset-required, reset mode (0 Resync, 1 Restart Song,
+2 Next Phrase), fills, mutation amount, reset-before-mutation, Card-ID seed enabled.
 
 The remaining 25 fields are uint32 values encoded as five least-significant-first
 7-bit bytes each: uptime ms, set milli-BPM, engine milli-BPM, tick, effective seed
@@ -147,10 +173,10 @@ us, minimum interval us, maximum interval us, queue lag us, maximum lag us, acti
 pulses, rejected pulses, delivered sync ticks, expected sync ticks, pending engine
 ticks, last accepted interval us, engine pulse age us, internal reentry depth,
 external reentry depth, active input PPQN. Never-observed raw ages are UINT32_MAX.
-Configuration responses now have 156 bytes: the six options append at 150-155.
-SET_CONFIG appends the same group at request bytes 22-27; partial groups or invalid
-booleans/counts are rejected before bank/settings changes. Legacy prefixes remain
-unchanged. The effective seed is interpreted as signed 32-bit by the browser.
+Configuration responses have 156 bytes: the six options append at 150-155.
+SET_CONFIG appends the same group at request bytes 22-27; partial groups, invalid
+reset modes, booleans or counts are rejected before bank/settings changes. The
+effective seed is interpreted as signed 32-bit by the browser.
 
 ### Web bank workflow
 

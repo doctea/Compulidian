@@ -352,7 +352,14 @@
   </div>
   <div class="row">
     <label class="toggle"><input id="cfg-reset-required" type="checkbox" checked disabled onchange="applyConfigLive()"> RESET required to enter CV clock mode</label>
-    <label class="toggle"><input id="cfg-reset-song" type="checkbox" checked disabled onchange="applyConfigLive()"> RESET also rewinds song position / seed</label>
+    <div class="col">
+      <label for="cfg-reset-song">RESET mode</label>
+      <select id="cfg-reset-song" disabled onchange="applyConfigLive()">
+        <option value="0">Resync</option>
+        <option value="2">Next Phrase</option>
+        <option value="1">Restart Song</option>
+      </select>
+    </div>
   </div>
   <div class="section-title">Euclidean</div>
   <div class="row">

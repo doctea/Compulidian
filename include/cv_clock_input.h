@@ -16,6 +16,7 @@ struct CvClockInputDiagnostics {
 };
 
 #ifdef ENABLE_CLOCK_INPUT_CV
+void capture_cv_clock_edges(bool reset_rising, bool clock_rising);
 bool take_cv_clock_event(bool &reset, uint32_t &observed_at_us);
 CvClockInputDiagnostics get_cv_clock_input_diagnostics();
 #endif
