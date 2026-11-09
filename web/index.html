@@ -1,1 +1,408 @@
-compulidian_manager.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compulidian Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/webmidi@3.1.12/dist/iife/webmidi.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root {
+    --bg:      #18181b;
+    --surface: #27272a;
+    --border:  #3f3f46;
+    --accent:  #f59e0b;
+    --text:    #f4f4f5;
+    --muted:   #a1a1aa;
+    --danger:  #ef4444;
+    --ok:      #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  h1 { padding: 1rem 1.5rem; font-size: 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: .75rem; }
+  h1 span.badge { font-size: .7rem; background: var(--accent); color: #000; padding: 2px 8px; border-radius: 99px; }
+  nav { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  nav button { padding: .6rem 1.25rem; background: none; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; border-bottom: 2px solid transparent; transition: .15s; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav button:hover { color: var(--text); }
+  .tab { display: none; padding: 1.25rem 1.5rem; max-width: 1100px; }
+  .tab.active { display: block; }
+  label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
+  select, input[type=number], input[type=text] { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .4rem .6rem; border-radius: 6px; font-size: .9rem; }
+  button.btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: .45rem .75rem; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: .15s; min-height: 34px; }
+  button.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  button.btn.primary:hover:not(:disabled) { opacity: .85; }
+  button.btn.danger { border-color: var(--danger); color: var(--danger); }
+  button.btn:disabled { opacity: .4; cursor: not-allowed; }
+  .row { display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem; }
+  .col { display: flex; flex-direction: column; gap: .3rem; }
+  #sample-dropzone.over { border-color: var(--accent); color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-bottom: 1rem; }
+  thead th { text-align: left; padding: .4rem .6rem; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 400; }
+  tbody td { padding: .4rem .6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: rgba(255,255,255,.03); }
+  .name-cell input { width: 100%; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 4px; border-radius: 4px; font-size: .85rem; }
+  .name-cell input:focus { border-color: var(--border); background: var(--surface); outline: none; }
+  #progress-bar-wrap { background: var(--surface); border-radius: 4px; height: 8px; margin-top: .5rem; display: none; }
+  #progress-bar { background: var(--accent); height: 100%; border-radius: 4px; width: 0; transition: width .1s; }
+  #status { font-size: .85rem; color: var(--muted); margin-top: .5rem; min-height: 1.2em; }
+  #status.ok   { color: var(--ok); }
+  #status.err  { color: var(--danger); }
+  .section-title { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 1.25rem 0 .6rem; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .75rem; }
+  .card h3 { font-size: .8rem; margin-bottom: .5rem; color: var(--muted); }
+  .midi-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: .4rem; }
+  .midi-status.on { background: var(--ok); }
+  #server-warning { background: #78350f; border: 1px solid #b45309; border-radius: 8px; padding: .75rem 1rem; margin: .75rem 1.5rem; font-size: .85rem; display: none; }
+  #server-warning strong { color: var(--accent); }
+  svg.lucide { width: 16px; height: 16px; flex-shrink: 0; }
+  fieldset { border: 0; min-width: 0; }
+  .toolbar { display: flex; align-items: flex-end; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .toolbar .spacer { flex: 1; }
+  .table-scroll { overflow-x: auto; margin-bottom: 1rem; }
+  .table-scroll table { margin-bottom: 0; }
+  #slot-table { min-width: 620px; table-layout: fixed; }
+  #slot-table th:nth-child(1) { width: 34px; }
+  #slot-table th:nth-child(2) { width: 130px; }
+  #slot-table th:nth-child(3) { width: 120px; }
+  #slot-table th:nth-child(5) { width: 100px; }
+  #slot-table th:nth-child(6) { width: 56px; }
+  #slot-table input[type=number] { width: 72px !important; padding: .3rem .4rem; }
+  #slot-table select { width: 100%; min-width: 0; }
+  .state-line { font-size: .8rem; color: var(--muted); min-height: 1.3em; margin-bottom: .5rem; }
+  details.advanced { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+  details.advanced summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: .75rem; }
+  dialog { margin: auto; width: min(420px, calc(100% - 2rem)); padding: 1.25rem; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  dialog::backdrop { background: #0009; }
+  dialog h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+  dialog .row:last-child { justify-content: flex-end; margin-bottom: 0; }
+  .playing-slot { background: #365a45 !important; }
+  label.toggle { display: flex; align-items: center; gap: .5rem; color: var(--text); font-size: .85rem; max-width: 100%; }
+  label.toggle input { flex-shrink: 0; }
+  .clock-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+  .clock-metrics div { min-width: 0; border-bottom: 1px solid var(--border); padding-bottom: .65rem; }
+  .clock-metrics dt { color: var(--muted); font-size: .8rem; margin-bottom: .35rem; }
+  .clock-metrics dd { font-variant-numeric: tabular-nums; font-size: .95rem; min-height: 1.3em; overflow-wrap: anywhere; }
+  .clock-edge { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--border); margin-right: .4rem; }
+  .clock-edge.active { background: var(--ok); box-shadow: 0 0 0 3px #22c55e22; }
+  #clock-warning { color: var(--danger); min-height: 1.5em; margin-bottom: .75rem; font-size: .85rem; }
+  @media (max-width: 600px) {
+    h1 { padding: .8rem 1rem; flex-wrap: wrap; }
+    .tab { padding: 1rem; }
+    nav button { flex: 1; padding: .65rem .5rem; }
+    .toolbar .spacer { display: none; }
+    #connection-bar { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Compulidian Manager <span class="badge">Workshop Computer</span></h1>
+
+<div id="server-warning">
+  <strong>⚠ Must be served over HTTP from localhost</strong> — open via
+  <code>http://localhost:PORT/compulidian_manager.html</code>, not as a <code>file://</code> URL.
+  WebUSB and Web MIDI require a secure context (HTTPS or localhost).
+  ES module imports will silently fail on <code>file://</code>.
+  Run <code>python3 -m http.server 8080</code> in the <code>tools/web/</code> folder, or use any local HTTP server.
+</div>
+
+<div id="connection-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border)">
+  <button class="btn primary" onclick="midiConnect()">
+    <span class="midi-status" id="midi-dot"></span> Connect
+  </button>
+  <span id="midi-device-name" style="font-size:.85rem;color:var(--muted)">Not connected</span>
+</div>
+
+<div id="action-bar" style="display:flex;align-items:center;gap:.75rem;padding:.6rem 1.5rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
+  <div class="col">
+    <label for="cfg-active-bank">Playing bank</label>
+    <select id="cfg-active-bank" disabled onchange="applyConfigLive()">
+      <option value="0">0 — Compiled-in (808)</option>
+      <option value="1">1 — Flash bank 1</option>
+      <option value="2">2 — Flash bank 2</option>
+      <option value="3">3 — Flash bank 3</option>
+      <option value="4">4 — Flash bank 4</option>
+    </select>
+  </div>
+  <span id="cfg-banks-available" style="font-size:.8rem;color:var(--muted)"></span>
+  <button class="btn" id="refresh-device-btn" onclick="midiConnect()" title="Refresh device" aria-label="Refresh device"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+</div>
+
+<div id="status-bar" style="padding:.5rem 1.5rem;border-bottom:1px solid var(--border)">
+  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+  <div id="status" role="status" aria-live="polite"></div>
+</div>
+
+<nav>
+  <button class="active" onclick="switchTab('bank', this)">Banks</button>
+  <button onclick="switchTab('samples', this)">Samples</button>
+  <button onclick="switchTab('other', this)">Settings</button>
+  <button onclick="switchTab('clock', this)">Clock</button>
+  <button onclick="switchTab('io', this)">Device</button>
+</nav>
+
+<!-- =====================================================================
+     TAB: BANK MANAGEMENT
+     ===================================================================== -->
+<div id="tab-bank" class="tab active">
+
+  <p id="slots-gate" style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">
+    Not connected.
+  </p>
+
+  <div id="bank-editor" style="display:none">
+    <fieldset id="bank-form" disabled>
+    <div class="toolbar">
+      <div class="col">
+        <label for="bank-slot">Edit bank</label>
+        <select id="bank-slot" onchange="onBankSlotChanged()"></select>
+      </div>
+      <div class="col">
+        <label for="bank-name">Name</label>
+        <input type="text" id="bank-name" value="" maxlength="23" style="width:160px" oninput="markBankDirty()">
+      </div>
+      <span class="spacer"></span>
+      <button class="btn" id="play-bank-btn" onclick="playEditedBank()"><i data-lucide="play" aria-hidden="true"></i> Play bank</button>
+      <button class="btn" id="copy-bank-btn" onclick="openCopyBankDialog()"><i data-lucide="copy" aria-hidden="true"></i> Copy to...</button>
+      <button class="btn" id="pull-from-device-btn" onclick="readFromDevice()"><i data-lucide="undo-2" aria-hidden="true"></i> Discard</button>
+      <button class="btn primary" id="save-bank-btn" onclick="writeBankToDevice()"><i data-lucide="save" aria-hidden="true"></i> Save bank</button>
+    </div>
+
+    <div id="bank-active-indicator" class="state-line"></div>
+    <div id="bank-state-banner" class="state-line" aria-live="polite"></div>
+    <p id="samples-empty-hint" style="display:none;font-size:.8rem;color:var(--muted);margin-bottom:.75rem">
+      No installed samples. Built-in samples are available.
+    </p>
+    <div class="row" style="margin-bottom:.5rem;align-items:flex-end">
+      <div class="col">
+        <label>Sample type</label>
+        <select id="bank-filter-type" onchange="onBankFilterChanged()"></select>
+      </div>
+      <div class="col">
+        <label>Tag</label>
+        <input type="text" id="bank-filter-tag" placeholder="e.g. acoustic" style="width:140px" onchange="onBankFilterChanged()">
+      </div>
+      <div class="col">
+        <label style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
+          <input type="checkbox" id="bank-filter-show-all" checked onchange="onBankFilterChanged()"> Show all
+        </label>
+      </div>
+    </div>
+
+    <div class="table-scroll"><table id="slot-table">
+      <thead><tr>
+        <th>#</th>
+        <th>Slot</th>
+        <th>Note</th>
+        <th>Sample</th>
+        <th>Volume</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="slot-list"></tbody>
+    </table></div>
+    </fieldset>
+  </div><!-- /bank-editor -->
+
+</div><!-- /tab-bank -->
+
+<dialog id="copy-bank-dialog" aria-labelledby="copy-bank-title">
+  <h2 id="copy-bank-title">Copy bank</h2>
+  <p id="copy-bank-source" class="state-line"></p>
+  <div class="row"><div class="col">
+    <label for="copy-bank-target">Destination</label>
+    <select id="copy-bank-target"></select>
+  </div></div>
+  <div class="row">
+    <button class="btn" onclick="document.getElementById('copy-bank-dialog').close()">Cancel</button>
+    <button class="btn primary" id="confirm-copy-btn" onclick="copyBankToDevice()"><i data-lucide="copy" aria-hidden="true"></i> Copy bank</button>
+  </div>
+</dialog>
+
+<!-- =====================================================================
+     TAB: SAMPLE STORE
+     ===================================================================== -->
+<div id="tab-samples" class="tab">
+
+  <div class="section-title">Installed samples</div>
+  <fieldset id="sample-tags-form" disabled>
+  <div class="row" style="margin-bottom:.5rem">
+    <button class="btn" onclick="refreshSampleList()" title="Refresh samples" aria-label="Refresh samples"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+    <button class="btn" id="save-tags-btn" disabled onclick="writeSampleMetaToDevice()"><i data-lucide="save" aria-hidden="true"></i> Save tags</button>
+    <span id="sample-tags-state" class="state-line" aria-live="polite"></span>
+    <span id="device-samples-summary" style="font-size:.8rem;color:var(--muted)"></span>
+  </div>
+  <div class="table-scroll"><table id="device-samples-table">
+    <thead><tr>
+      <th>Name</th><th>Hash</th><th>Rate</th><th>Duration</th><th>Size</th><th>Type</th><th>Tags</th><th></th>
+    </tr></thead>
+    <tbody id="device-samples-list"></tbody>
+  </table></div>
+  </fieldset>
+
+  <div class="section-title">Staged samples</div>
+  <input type="file" id="sample-file-input" accept=".wav,audio/wav" multiple style="display:none" onchange="handleSampleFileInput(event)">
+  <div id="sample-dropzone" ondragover="event.preventDefault(); this.classList.add('over')"
+       ondragleave="this.classList.remove('over')"
+       ondrop="handleSampleDrop(event)"
+       onclick="document.getElementById('sample-file-input').click()"
+       style="border:2px dashed var(--border); border-radius:8px; padding:1.5rem; text-align:center; color:var(--muted); cursor:pointer; margin-bottom:1rem">
+    Add WAV files
+  </div>
+  <div class="table-scroll"><table id="staged-samples-table">
+    <thead><tr>
+      <th>Name</th><th>Rate</th><th>Duration</th><th>Size</th><th>Status</th><th></th>
+    </tr></thead>
+    <tbody id="staged-samples-list"></tbody>
+  </table></div>
+
+  <div class="row">
+    <button class="btn primary" onclick="buildAndDownloadIncrementalUf2()"><i data-lucide="download" aria-hidden="true"></i> Download update (.uf2)</button>
+    <button class="btn" onclick="exportSampleLibrary()"><i data-lucide="download" aria-hidden="true"></i> Export staged samples</button>
+    <button class="btn" onclick="document.getElementById('library-file-input').click()"><i data-lucide="folder-open" aria-hidden="true"></i> Import library</button>
+    <input type="file" id="library-file-input" accept=".samplib.json,application/json" style="display:none" onchange="handleLibraryFileInput(event)">
+  </div>
+  <details class="advanced"><summary>Reclaim sample storage</summary>
+  <p class="state-line">Replaces all installed samples with the staged library.</p>
+  <div class="row">
+    <button class="btn danger" onclick="rebuildStoreFromLibrary()"><i data-lucide="triangle-alert" aria-hidden="true"></i> Rebuild storage (.uf2)</button>
+  </div>
+  </details>
+
+</div><!-- /tab-samples -->
+
+<!-- =====================================================================
+     TAB: OUTPUT/INPUT MAPPING
+     ===================================================================== -->
+<div id="tab-io" class="tab">
+  <div class="section-title">Fixed routing</div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Source</th><th>Destination</th></tr></thead>
+    <tbody>
+      <tr><td>Main + CV 1</td><td>Density group 1</td></tr>
+      <tr><td>X + CV 2</td><td>Density group 2</td></tr>
+      <tr><td>Y</td><td>Internal tempo</td></tr>
+      <tr><td>Audio In 1</td><td>Shuffle</td></tr>
+      <tr><td>Audio In 2</td><td>Sample pitch</td></tr>
+    </tbody>
+  </table></div>
+  <div hidden>
+  <div class="grid4" id="cfg-outputs">
+    <!-- filled by renderOutputs() -->
+  </div>
+
+  <div class="section-title">CV Input Roles</div>
+  <div class="grid2" id="cfg-cv-inputs">
+    <!-- filled by renderCVInputs() -->
+  </div>
+
+  <div class="section-title">Knob Roles</div>
+  <div class="grid4" id="cfg-knobs" style="grid-template-columns:repeat(3,1fr)">
+    <!-- filled by renderKnobs() -->
+  </div>
+  </div>
+  <details class="advanced"><summary>Maintenance</summary>
+    <button class="btn danger" onclick="rebootToBootloader()"><i data-lucide="power" aria-hidden="true"></i> Enter flash mode</button>
+  </details>
+  <details id="midi-log-panel" class="advanced">
+    <summary>MIDI diagnostics</summary>
+    <div class="row">
+      <button class="btn" onclick="clearMidiLog()">Clear log</button>
+      <span id="midi-runtime-tag" class="state-line"></span>
+    </div>
+    <pre id="midi-debug-log" style="max-height:180px;overflow:auto;font-size:.72rem;white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+  </details>
+
+</div><!-- /tab-io -->
+
+<!-- =====================================================================
+     TAB: OTHER SETTINGS
+     ===================================================================== -->
+<div id="tab-other" class="tab">
+  <div class="toolbar">
+    <span id="settings-save-state" class="state-line">Not connected</span>
+    <span class="spacer"></span>
+    <button class="btn primary" id="save-settings-btn" disabled onclick="saveConfig().catch(console.warn)"><i data-lucide="save" aria-hidden="true"></i> Save settings</button>
+  </div>
+  <div class="section-title">Performance</div>
+  <div class="row">
+    <div class="col">
+      <label for="cfg-momentary-role">Momentary switch</label>
+      <select id="cfg-momentary-role" disabled onchange="applyConfigLive()">
+        <option value="0">Mute while held</option>
+        <option value="1">Select bank</option>
+      </select>
+    </div>
+    <div class="col">
+      <label for="cfg-cv-clock-ppqn">CV clock input (Pulse 2)</label>
+      <select id="cfg-cv-clock-ppqn" disabled onchange="applyConfigLive()">
+        <option value="1">1 PPQN</option>
+        <option value="2">2 PPQN</option>
+        <option value="4">4 PPQN</option>
+        <option value="8">8 PPQN</option>
+        <option value="12">12 PPQN</option>
+        <option value="16">16 PPQN</option>
+        <option value="24">24 PPQN</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <label class="toggle"><input id="cfg-reset-required" type="checkbox" checked disabled onchange="applyConfigLive()"> RESET required to enter CV clock mode</label>
+    <div class="col">
+      <label for="cfg-reset-song">RESET mode</label>
+      <select id="cfg-reset-song" disabled onchange="applyConfigLive()">
+        <option value="0">Resync</option>
+        <option value="2">Next Phrase</option>
+        <option value="1">Restart Song</option>
+      </select>
+    </div>
+  </div>
+  <div class="section-title">Euclidean</div>
+  <div class="row">
+    <label class="toggle"><input id="cfg-fills" type="checkbox" checked disabled onchange="applyConfigLive()"> Fills enabled</label>
+    <div class="col">
+      <label for="cfg-mutation-amount">Mutation amount</label>
+      <input id="cfg-mutation-amount" type="number" min="0" max="8" step="1" value="3" disabled onchange="applyConfigLive()">
+    </div>
+    <label class="toggle"><input id="cfg-reset-mutation" type="checkbox" checked disabled onchange="applyConfigLive()"> Reset before mutation</label>
+    <label class="toggle"><input id="cfg-seed-card-id" type="checkbox" disabled onchange="applyConfigLive()"> Add Card ID to seed</label>
+  </div>
+</div><!-- /tab-other -->
+
+<div id="tab-clock" class="tab">
+  <div class="toolbar">
+    <span id="clock-connection" class="state-line" role="status">Not connected.</span>
+    <span class="spacer"></span>
+    <button class="btn" id="clock-record" disabled onclick="toggleClockRecording()" title="Record clock trace"><i data-lucide="circle" aria-hidden="true"></i><span id="clock-record-label">Record trace</span></button>
+    <button class="btn" id="clock-download" disabled onclick="downloadClockTrace()" title="Download clock trace" aria-label="Download clock trace"><i data-lucide="download" aria-hidden="true"></i></button>
+    <button class="btn" id="clock-clear" disabled onclick="clearClockTrace()" title="Clear clock trace" aria-label="Clear clock trace"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+    <span id="clock-record-count" class="state-line">0 samples</span>
+  </div>
+  <div id="clock-warning" role="status"></div>
+  <dl class="clock-metrics">
+    <div><dt>Set BPM</dt><dd id="clock-set-bpm">--</dd></div>
+    <div><dt>Engine BPM</dt><dd id="clock-engine-bpm">--</dd></div>
+    <div><dt>CV detected BPM</dt><dd id="clock-detected-bpm">--</dd></div>
+    <div><dt>Source / active PPQN</dt><dd id="clock-source">--</dd></div>
+    <div><dt>Transport / strict mode</dt><dd id="clock-state">--</dd></div>
+    <div><dt>CV pulses observed</dt><dd><span id="clock-pulse-light" class="clock-edge"></span><span id="clock-pulses">--</span></dd></div>
+    <div><dt>CV resets observed</dt><dd><span id="clock-reset-light" class="clock-edge"></span><span id="clock-resets">--</span></dd></div>
+    <div><dt>Last pulse / reset age</dt><dd id="clock-ages">--</dd></div>
+    <div><dt>CV interval / min / max</dt><dd id="clock-interval">--</dd></div>
+    <div><dt>Queue lost / lag / max lag</dt><dd id="clock-queue">--</dd></div>
+    <div><dt>Active source pulses / rejected</dt><dd id="clock-accepted">--</dd></div>
+    <div><dt>Sync ticks delivered / expected</dt><dd id="clock-delivery">--</dd></div>
+    <div><dt>Strict pending ticks / stalled</dt><dd id="clock-strict">--</dd></div>
+    <div><dt>Accepted interval / pulse age</dt><dd id="clock-engine-timing">--</dd></div>
+    <div><dt>Engine reentry depth: internal / external</dt><dd id="clock-overlap">--</dd></div>
+    <div><dt>Tick / effective seed</dt><dd id="clock-position">--</dd></div>
+  </dl>
+</div>
+
+<script type="module" src="compulidian_manager.js"></script>
+</body>
+</html>
