@@ -3,9 +3,12 @@
 Made a start porting my euclidean rhythm generator + modulation libraries to a [Music Thing Workshop Computer](https://github.com/tomWhitwell/Workshop_Computer) card.
 
 https://github.com/doctea/Compulidian
-- Direct firmware download (UF2): https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2
+- Direct firmware download (UF2):
+  - Version for 16mb cards, with CV clock input enabled: [https://github.com/doctea/Compulidian/blob/main/firmware/firmware_rpipico_16mb_with_cv_clock_input.uf2](https://github.com/doctea/Compulidian/blob/main/firmware/firmware_rpipico_16mb_with_cv_clock_input.uf2)
+  - Version for 16mb cards, with CV clock input disabled in case you have trouble with the above: [https://github.com/doctea/Compulidian/blob/main/firmware/firmware_rpipico_16mb.uf2](https://github.com/doctea/Compulidian/blob/main/firmware/firmware_rpipico_16mb.uf2)
+  - (Untested 2mb card version) [https://github.com/doctea/Compulidian/raw/refs/heads/main/firmware/firmware.uf2](https://github.com/doctea/Compulidian/blob/main/firmware/firmware_rpipico.uf2)
 
-Its a platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
+It's a platformio project for vscode, with Arduino and the earlephilhower RP2040 core.
 
 The pinned ComputerCard reference, local driver changes, and optional legacy ADC
 divider are documented in [ComputerCard-notes.md](ComputerCard-notes.md).
