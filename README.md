@@ -1,6 +1,6 @@
 # Compulidian
 
-Made a start porting my euclidean rhythm generator + modulation libraries to a [Music Thing Workshop Computer](https://github.com/tomWhitwell/Workshop_Computer) card.
+Mutating, modulatable Euclidean rhythm generator with sample-playing drum machine as a [Music Thing Workshop Computer](https://github.com/tomWhitwell/Workshop_Computer) card.
 
 https://github.com/doctea/Compulidian
 - Direct firmware download (UF2):
@@ -13,9 +13,9 @@ It's a platformio project for vscode, with Arduino and the earlephilhower RP2040
 The pinned ComputerCard reference, local driver changes, and optional legacy ADC
 divider are documented in [ComputerCard-notes.md](ComputerCard-notes.md).
 
-- Uses my [parameters](https://github.com/doctea/parameters), [midihelpers](https://github.com/doctea/midihelpers) and [seqlib](https://github.com/doctea/seqlib) libraries.
-- Uses (patched) [uClock](https://github.com/midilab/uClock) for clock generation.
-- Sample player adapted from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player).
+- Uses my [parameters](https://github.com/doctea/parameters), [foundling](https://github.com/doctea/foundling), [midihelpers](https://github.com/doctea/midihelpers), [saveloadlib](https://github.com/doctea/saveloadlib) and [seqlib](https://github.com/doctea/seqlib) libraries.
+- Uses ([patched](https://github.com/doctea/uClock)) [uClock](https://github.com/midilab/uClock) for clock generation.
+- (Sample player originally adapted from [rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player](https://github.com/rheslip/Raspberry-Pi-Pico-Eurorack-Drum-Sample-Player))
 
 See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 
