@@ -1,0 +1,110 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build release environments",
+			"type": "process",
+			"command": "C:/Users/doctea/.platformio/penv/Scripts/platformio.exe",
+			"args": [
+				"run",
+				"--environment", "rpipico",
+				"--environment", "rpipico_16mb",
+				"--environment", "rpipico_16mb_with_cv_clock_input"
+			],
+			"options": {
+				"cwd": "${workspaceFolder:Compulidian}"
+			},
+			"isBackground": false,
+			"problemMatcher": ["$gcc"]
+		},
+		{
+			"label": "Build release firmware",
+			"type": "process",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$ErrorActionPreference = 'Stop'; foreach ($e in 'rpipico', 'rpipico_16mb', 'rpipico_16mb_with_cv_clock_input') { Copy-Item \".pio/build/$e/firmware_$e.uf2\" \"firmware/firmware_$e.uf2\"; Write-Host \"Staged firmware/firmware_$e.uf2\" }"
+			],
+			"options": {
+				"cwd": "${workspaceFolder:Compulidian}"
+			},
+			"dependsOn": "Build release environments",
+			"group": "build",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Upload trace firmware before debugging",
+			"type": "process",
+			"command": "C:/Users/doctea/.platformio/penv/Scripts/platformio.exe",
+			"args": [
+				"run",
+				"--target",
+				"upload",
+				"--environment",
+				"rpipico_16mb_usb_trace"
+			],
+			"options": {
+				"cwd": "${workspaceFolder:Compulidian}"
+			},
+			"isBackground": false,
+			"problemMatcher": ["$gcc"]
+		},
+		{
+			"label": "Verify preserved USB MIDI checkpoint",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"firmware/checkpoints/2026-10-16-usb-midi-working/verify.py"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Test output batching (native)",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"test/test_output_batching.py",
+				"--check-baseline"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"type": "cppbuild",
+			"label": "C/C++: arm-none-eabi-gcc.exe build active file",
+			"command": "C:/Users/doctea/.platformio/packages/toolchain-rp2040-earlephilhower/bin/arm-none-eabi-gcc.exe",
+			"args": [
+				"-fdiagnostics-color=always",
+				"-g",
+				"${file}",
+				"-o",
+				"${fileDirname}\\${fileBasenameNoExtension}.exe",
+				"-march=armv6-m",
+				"-mcpu=cortex-m0plus",
+				"-mthumb",
+				""
+			],
+			"options": {
+				"cwd": "C:/Users/doctea/.platformio/packages/toolchain-rp2040-earlephilhower/bin"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"detail": "compiler: C:/Users/doctea/.platformio/packages/toolchain-rp2040-earlephilhower/bin/arm-none-eabi-gcc.exe"
+		},
+		{
+			"label": "Test USB MIDI TX ownership (native)",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"test/test_usb_midi_tx.py"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
