@@ -44,8 +44,3 @@ On 16 MB firmware, you can also hold Switch DOWN while powering on to choose a b
 See [README-MORE.md](README-MORE.md) for detailed bank setup, clock and RESET options, web-manager workflows, diagnostics, serial commands, and build instructions. Hardware and driver notes are in [ComputerCard-notes.md](ComputerCard-notes.md).
 
 Known issue: ADC readings can fluctuate, most noticeably as sample-pitch variation. Feedback and collaboration are welcome.
-
-
-## Wait, is it Compulidean or Compulidian?
-
-I named it Compulidian, originally based on my [Microlidian](https://github.com/doctea/Microlidian) project, 'cos it uses Euclidean rhythms. Then I realised that I'd been mispelling it wrong all along, and it should have been Compulidean, but it was too late.  So now we have the worse situation of it using both names in different places.  Oops.
