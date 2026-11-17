@@ -188,6 +188,7 @@ void setup() {
 
   #ifdef USE_TINYUSB
     usb_midi_tx_queue.begin();
+    usb_midi_tx_queue.set_transport_ready(false);
     setup_serial();
     setup_usb();
     setup_midi();
@@ -240,7 +241,7 @@ void setup() {
     output_processor = new ChosenDrumKitMIDIOutputProcessor(&output_wrapper);
     sequencer = new EuclidianSequencer(output_processor->nodes, output_processor->nodes->size(), NUM_GLOBAL_DENSITY_GROUPS);
     sequencer->restart_progression();
-    sequencer->debug = true;
+    sequencer->debug = false;
     output_processor->configure_sequencer(sequencer);
     ((EuclidianSequencer*)sequencer)->initialise_patterns();
     ((EuclidianSequencer*)sequencer)->reset_patterns();
@@ -371,6 +372,7 @@ void __not_in_flash_func(loop)() {
   #ifdef USE_TINYUSB
     // Service USB + pending SysEx responses even if config mode is active.
     TinyUSB_Device_Task();
+    usb_midi_tx_queue.set_transport_ready(TinyUSBDevice.ready());
     usb_midi_tx_queue.drain(usb_midi, g_usbmidi_tx_busy);
     for (uint32_t read_count = 0; read_count < 64 && usb_midi.available(); ++read_count) {
       USBMIDI.read();
@@ -422,7 +424,7 @@ void __not_in_flash_func(loop)() {
     }*/
 
     #ifdef USE_TINYUSB
-      if (ticked && debug_enable_output_parameter_input) 
+      if (ticked && debug_enable_output_parameter_input && Serial)
         parameter_manager->output_parameter_representation();
     #endif
 

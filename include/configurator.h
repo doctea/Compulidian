@@ -239,11 +239,12 @@ static bool dequeue_pending_sysex(PendingSysexItem *out) {
 // queued or retried - corrupting/truncating any sysex frame bigger than ~60 bytes.
 // Write bytes ourselves with backpressure (retry + tud_task() to drain) instead.
 static bool midi_write_byte_blocking_(uint8_t b, uint32_t start_ms) {
-    while (usb_midi.write(b) != 1) {
+    while (tud_connected() && !TinyUSBDevice.suspended()) {
+        if (usb_midi.write(b) == 1) return true;
         TinyUSB_Device_Task();
         if ((millis() - start_ms) > 2000) return false; // host likely gone; don't hang forever
     }
-    return true;
+    return false;
 }
 
 static bool send_sysex_bytes_reliable_(const uint8_t *data, size_t len) {
@@ -263,15 +264,20 @@ static bool send_sysex_bytes_reliable_(const uint8_t *data, size_t len) {
 
 static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const uint8_t *payload, uint16_t payload_len) {
     // On first browser connect, MIDI can become usable slightly before mounted()
-    // stabilizes. Wait briefly, but do not hard-drop the frame if it still reads false.
+    // stabilizes. Wait briefly only while a host is connected.
     if (!TinyUSBDevice.mounted()) {
         const uint32_t start_ms = millis();
-        while (!TinyUSBDevice.mounted() && (millis() - start_ms) < 250) {
+        while (!TinyUSBDevice.mounted() && tud_connected()
+            && !TinyUSBDevice.suspended() && (millis() - start_ms) < 250) {
             delay(1);
         }
-        if (SYSEX_DEBUG && !TinyUSBDevice.mounted() && Serial) {
-            Serial.println("send_sysex_frame(): USB still reports unmounted, attempting send anyway");
-        }
+    }
+    if (!tud_connected() || TinyUSBDevice.suspended()) {
+        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB host unavailable, dropping frame");
+        return false;
+    }
+    if (SYSEX_DEBUG && !TinyUSBDevice.mounted() && Serial) {
+        Serial.println("send_sysex_frame(): USB still reports unmounted, attempting send anyway");
     }
 
     uint8_t buf[SYSEX_FRAME_BYTES + SYSEX_MAX_PAYLOAD];
@@ -296,7 +302,7 @@ static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const
             type, req_id, status, payload_len);
     }
     if (!send_sysex_bytes_reliable_(buf, SYSEX_FRAME_BYTES + payload_len)) {
-        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB write timed out (FIFO congested)");
+        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB write failed (disconnected, suspended or FIFO congested)");
         return false;
     }
     return true;
@@ -314,6 +320,12 @@ static void process_pending_sysex_responses() {
     PendingSysexItem item;
     int processed = 0;
     while (processed < 6 && dequeue_pending_sysex(&item)) {
+        ++processed;
+        if (item.action != PENDING_REBOOT_BOOTSEL
+            && (!tud_connected() || TinyUSBDevice.suspended())) {
+            if (SYSEX_DEBUG && Serial) Serial.println("pending sysex: USB host unavailable, dropping response");
+            continue;
+        }
         switch (item.action) {
             case PENDING_SEND_CONFIG:
                 send_config_sysex(item.req_id);
@@ -361,7 +373,6 @@ static void process_pending_sysex_responses() {
             default:
                 break;
         }
-        processed++;
     }
 }
 

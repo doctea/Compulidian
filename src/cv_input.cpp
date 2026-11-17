@@ -36,7 +36,7 @@ extern WorkshopOutputWrapper output_wrapper;
 //#include "Wire.h"
 bool cv_input_enabled = true;
 
-#define tft_print(X) Serial.print(X)
+#define tft_print(X) { if (Serial) Serial.print(X); }
 
 // initialise the voltage-reading hardware/libraries and the ParameterManager
 FLASHMEM
@@ -98,13 +98,13 @@ void setup_parameter_inputs() {
 
     // initialise the voltage source inputs
     // CVs are bipolar input, knobs are unipolar
-    Serial.println(F("==== begin setup_parameter_inputs ====")); Serial_flush();
+    if (Serial) Serial.println(F("==== begin setup_parameter_inputs ===="));
     VoltageParameterInput *vpi_knob_main = new VoltageParameterInput((char*)"Main", "CV Inputs", parameter_manager->voltage_sources->get(0), 0.005, UNIPOLAR, true);    
     VoltageParameterInput *vpi_cv_1 = new VoltageParameterInput((char*)"CV1", "CV Inputs",       parameter_manager->voltage_sources->get(1), 0.005, BIPOLAR, true);    
-    Serial.println(F("==== begin setup_parameter_inputs 2====")); Serial_flush();
+    if (Serial) Serial.println(F("==== begin setup_parameter_inputs 2===="));
     VoltageParameterInput *vpi_knob_x = new VoltageParameterInput((char*)"X", "CV Inputs",       parameter_manager->voltage_sources->get(2), 0.005, UNIPOLAR, true);    
     VoltageParameterInput *vpi_cv_2 = new VoltageParameterInput((char*)"CV2", "CV Inputs",       parameter_manager->voltage_sources->get(3), 0.005, BIPOLAR, true);    
-    Serial.println(F("==== begin setup_parameter_inputs 3====")); Serial_flush();
+    if (Serial) Serial.println(F("==== begin setup_parameter_inputs 3===="));
     VoltageParameterInput *vpi_knob_y = new VoltageParameterInput((char*)"Y", "CV Inputs",       parameter_manager->voltage_sources->get(4), 0.01, UNIPOLAR, true);    
 
     //VoltageParameterInput *vpi_switch = new VoltageParameterInput((char*)"Switch", "CV Inputs",  parameter_manager->voltage_sources->get(5), 0.005, UNIPOLAR, false);    
@@ -170,7 +170,7 @@ void setup_parameter_inputs() {
     #ifdef ENABLE_SHUFFLE
         FloatParameter *shuffle_amount_parameter = shuffle_pattern_wrapper.getParameters()->getByName("Shuffle amount 0");
         if (shuffle_amount_parameter==nullptr) {
-            Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!"); Serial_flush();
+            if (Serial) Serial.println("ERROR: couldn't find 'Shuffle amount 0' parameter!");
         } else {
             // shuffle_amount_parameter->updateValueFromNormal(0.2f);
             sequencer->set_shuffle_enabled(true);

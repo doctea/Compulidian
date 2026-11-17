@@ -122,12 +122,7 @@ void setup_samples() {
 SamplePlayer sw;
 void setup1()
 {
-  while (!started && !Serial) {
-    Serial.println("setup() - waiting to start");
-    delay(100);
-  }
-  delay(500);
-  Serial.println(F("setup1 started!"));
+  while (!started) delay(1);
 
   #ifndef COMPULIDIAN_DISABLE_NORMALISATION_PROBE
     sw.EnableNormalisationProbe();

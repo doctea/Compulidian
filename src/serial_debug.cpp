@@ -108,6 +108,10 @@ volatile uint32_t pulse_1_transitions = 0;
   char serial_input_buffer[256];
   char serial_input_buffer_index = 0;
   void __not_in_flash_func(process_serial_input)() {
+    if (!Serial) {
+      serial_input_buffer_index = 0;
+      return;
+    }
     //Serial.println(F("process_serial_input()"));
     while (Serial.available()) {
       char c = Serial.read();

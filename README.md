@@ -82,7 +82,16 @@ temporarily borrows Main to choose a bank without muting new notes. Release
 to load and remember that bank. Selection does not load banks while the knob
 is moving. Bank loading fades the output briefly to silence and back; existing
 sample tails stop at the fade and are not carried across as a crossfade.
+Bank selection works without USB; status updates are dropped when no USB
+host is available rather than waiting for a transmit timeout.
 The latched UP position still freezes the random seed in either role.
+
+Standalone performance is the primary operating mode: startup never waits
+for a serial terminal. USB MIDI echoes are discarded while the host is
+unavailable, including queued notes on disconnect, so reconnecting does not
+replay old performance events. Local samples, gates and LEDs remain active.
+The shared midihelpers MIDI TX queue provides `set_transport_ready()` for
+this host-state handling.
 
 Borrowed knobs retain their previous density contribution until returned to
 their previous position (pickup); CV modulation continues. Main uses pickup
