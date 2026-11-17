@@ -22,23 +22,14 @@ See `platformio.ini` `build_flags` and `include/Config.h` for some settings.
 ## Release firmware
 
 In VS Code, run **Tasks: Run Task** and select **Build release firmware**.
-Alternatively, from the project directory:
-
-```sh
-python tools/build_release.py
-```
-
-This builds all three release environments, then copies their UF2 files to:
+This uses the VS Code PlatformIO installation to build all three release
+environments, then copies their UF2 files to:
 
 - `firmware/firmware_rpipico.uf2`
 - `firmware/firmware_rpipico_16mb.uf2`
 - `firmware/firmware_rpipico_16mb_with_cv_clock_input.uf2`
 
-Existing release files are not changed if a build fails or an expected UF2 is
-missing. Nothing is uploaded, and preserved checkpoints are left alone.
-The script finds PlatformIO on PATH or in its standard VS Code installation;
-use `--pio PATH_TO_PLATFORMIO` for a custom installation. Use `python3` instead
-of `python` on systems where required.
+Release files are not changed if the build fails. Nothing is uploaded.
 
 ## Basic features
 
