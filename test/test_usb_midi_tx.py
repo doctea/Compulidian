@@ -337,6 +337,9 @@ SYSEX_HARNESS = r"""
 #include <iostream>
 #include <vector>
 
+#define Serial_println(...) do { if (Serial) Serial.println(__VA_ARGS__); } while (0)
+#define Serial_printf(...) do { if (Serial) Serial.printf(__VA_ARGS__); } while (0)
+
 constexpr bool SYSEX_DEBUG = true;
 constexpr unsigned SYSEX_FRAME_BYTES = 6;
 constexpr unsigned SYSEX_MAX_PAYLOAD = 128;

@@ -1,3 +1,4 @@
+#include "shared_debug.h"
 #include "Config.h"
 
 #include <Arduino.h>
@@ -190,12 +191,18 @@ void setup() {
     usb_midi_tx_queue.begin();
     usb_midi_tx_queue.set_transport_ready(false);
     setup_serial();
+    #ifdef ENABLE_SERIAL_OUTPUT_QUEUE
+      foundling::serial_output().begin();
+    #endif
     setup_usb();
     setup_midi();
   #endif
 
-  if (Serial && !system_clock_configured) {
-    Serial.printf("System clock request failed: requested=%lu kHz actual=%lu kHz\n",
+  #ifdef ENABLE_WARNING_LOG
+    foundling::warning_log();
+  #endif
+  if (!system_clock_configured) {
+    Warn_printf("System clock request failed: requested=%lu kHz actual=%lu kHz\n",
         (unsigned long)SYSTEM_CLOCK_KHZ, (unsigned long)(clock_get_hz(clk_sys) / 1000));
   }
 
@@ -234,7 +241,7 @@ void setup() {
     shuffle_pattern_wrapper[0]->set_steps(shuffle_75, sizeof(shuffle_75));
   #endif
 
-  if (Serial) { Serial.println(F("done setup_uclock()")); }
+  Serial_println(F("done setup_uclock()"));
   
   #ifdef ENABLE_EUCLIDIAN
     //Serial.println("setting up sequencer..");
@@ -251,17 +258,17 @@ void setup() {
 
   #ifdef ENABLE_PARAMETERS
     #ifdef ENABLE_CV_INPUT
-      if (Serial) { Serial.println(F("setting up cv input..")); Serial.flush(); }
+      Serial_println(F("setting up cv input..")); Serial_flush();
       setup_cv_input();
-      if (Serial) { Serial.println(F("..done setup_cv_input")); Serial.flush(); }
+      Serial_println(F("..done setup_cv_input")); Serial_flush();
 
       // Must call getParameters() before setup_parameter_inputs(), so that
       // getParameterByName() calls inside setup_parameter_inputs() can find them.
       sequencer->getParameters();
       
-      if (Serial) { Serial.println(F("setting up parameter inputs..")); Serial.flush(); }
+      Serial_println(F("setting up parameter inputs..")); Serial_flush();
       setup_parameter_inputs();
-      if (Serial) { Serial.println(F("..done setup_parameter_inputs")); Serial.flush(); }
+      Serial_println(F("..done setup_parameter_inputs")); Serial_flush();
       Debug_printf("after setup_parameter_inputs(), free RAM is\t%u\n", freeRam());
     #endif
     setup_output_processor_parameters();
@@ -297,22 +304,22 @@ void setup() {
 
   started = true;
 
-  if (Serial) { Serial.println(F("setup() done - starting!")); }
-  if (Serial) {
-    Serial.printf("Banks: %d valid  (active=%d)\n",
+  Serial_println(F("setup() done - starting!"));
+  if (FOUNDLING_SERIAL_CONNECTED) {
+    Serial_printf("Banks: %d valid  (active=%d)\n",
         bankManager.num_valid_banks(), bankManager.active_bank());
     for (int s = 0; s <= bankManager.MAX_FLASH_BANKS; ++s) {
         if (bankManager.is_bank_valid(s)) {
             if (s == 0) {
-                Serial.printf("  Bank 0: compiled-in\n");
+                Serial_printf("  Bank 0: compiled-in\n");
             } else {
                 const char *bname = bankManager.get_bank_name(s);
-                Serial.printf("  Bank %d: '%s' (%u slots used)\n",
+                Serial_printf("  Bank %d: '%s' (%u slots used)\n",
                     s, bname ? bname : "?", bankManager.get_bank_slot_count(s));
             }
         }
     }
-    Serial.printf("Flash layout: banks start at 0x%08X, slot size 0x%X\n",
+    Serial_printf("Flash layout: banks start at 0x%08X, slot size 0x%X\n",
         FLASH_BANKS_ADDR, FLASH_BANK_SIZE);
   }
 }
@@ -343,35 +350,41 @@ void __not_in_flash_func(do_tick)(uint32_t in_ticks) {
 }
 
 void __not_in_flash_func(loop)() {
+  #ifdef USE_TINYUSB
+    TinyUSB_Device_Task();
+    #ifdef ENABLE_SERIAL_OUTPUT_QUEUE
+      foundling::serial_output().drain();
+    #endif
+  #endif
+
   // Print a status summary whenever a serial terminal (re-)connects.
   // boot-time prints happen before USB CDC is ready, so this is the only
   // reliable way to see them after opening the monitor post-boot.
   static bool serial_prev = false;
-  bool serial_now = (bool)Serial;
+  const bool serial_now = FOUNDLING_SERIAL_CONNECTED;
   if (serial_now && !serial_prev) {
-      Serial.printf("\n=== Compulidian connected (uptime %ums) ===\n", millis());
-      Serial.printf("Flash: XIP_BASE=0x%08X  BANKS_OFFSET=0x%08X  BANK_SIZE=0x%08X  MAX_BANKS=%d\n",
+      Serial_printf("\n=== Compulidian connected (uptime %ums) ===\n", millis());
+      Serial_printf("Flash: XIP_BASE=0x%08X  BANKS_OFFSET=0x%08X  BANK_SIZE=0x%08X  MAX_BANKS=%d\n",
           XIP_BASE, FLASH_BANKS_OFFSET, FLASH_BANK_SIZE, FLASH_MAX_BANKS);
-      Serial.printf("Banks: active=%d  valid_count=%d\n",
+      Serial_printf("Banks: active=%d  valid_count=%d\n",
           bankManager.active_bank(), bankManager.num_valid_banks());
       for (int slot = 1; slot <= FLASH_MAX_BANKS; ++slot) {
           const char *bname = bankManager.get_bank_name(slot);
-          Serial.printf("  slot %d: %s  name='%s' slots_used=%u\n",
+          Serial_printf("  slot %d: %s  name='%s' slots_used=%u\n",
               slot,
               bankManager.is_bank_valid(slot) ? "VALID  " : "empty  ",
               bname ? bname : "",
               bankManager.get_bank_slot_count(slot));
       }
       Settings s = settings_load();
-      Serial.printf("Settings: active_bank=%u  magic=0x%08X\n", s.active_bank, s.magic);
-      Serial.printf("Type '?' for command help, 'b' to re-print bank status.\n");
-      Serial.flush();
+      Serial_printf("Settings: active_bank=%u  magic=0x%08X\n", s.active_bank, s.magic);
+      Serial_printf("Type '?' for command help, 'b' to re-print bank status.\n");
+      Serial_flush();
   }
   serial_prev = serial_now;
 
   #ifdef USE_TINYUSB
     // Service USB + pending SysEx responses even if config mode is active.
-    TinyUSB_Device_Task();
     usb_midi_tx_queue.set_transport_ready(TinyUSBDevice.ready());
     usb_midi_tx_queue.drain(usb_midi, g_usbmidi_tx_busy);
     for (uint32_t read_count = 0; read_count < 64 && usb_midi.available(); ++read_count) {
@@ -424,7 +437,7 @@ void __not_in_flash_func(loop)() {
     }*/
 
     #ifdef USE_TINYUSB
-      if (ticked && debug_enable_output_parameter_input && Serial)
+      if (ticked && debug_enable_output_parameter_input)
         parameter_manager->output_parameter_representation();
     #endif
 

@@ -1,3 +1,4 @@
+#include "shared_debug.h"
 #include "audio/bank_manager.h"
 #include "audio/samps.h"   // sample[], NUM_SAMPLES, sample_data
 #include "audio/audio.h"   // voice[], NUM_VOICES
@@ -100,7 +101,7 @@ bool BankManager::switch_bank(int n, bool persist) {
 
     if (ok) {
         active_bank_ = n;
-        if (Serial) Serial.printf("BankMgr: switched to bank %d\n", n);
+        Serial_printf("BankMgr: switched to bank %d\n", n);
 
         // Persist new bank choice to flash.
         if (persist) {
@@ -203,7 +204,7 @@ bool BankManager::load_bank_config_(int slot) {
     snprintf(path, sizeof(path), BANK_CONFIG_SAVE_PATH_FMT, slot);
 
     if (!load_bank_config_file_(bank_config_, path)) {
-        if (Serial) Serial.printf("BankMgr: load FAILED - could not read %s\n", path);
+        Warn_printf("BankMgr: load FAILED - could not read %s\n", path);
         return false;
     }
 
@@ -262,7 +263,7 @@ bool BankManager::load_bank_config_(int slot) {
                     ? (uint32_t)compiled_cache_[ci]->size() << 12
                     : 0xFFFFFFFFu;
             } else {
-                if (Serial) Serial.printf("BankMgr: slot %d voice %u compiled index %u out of range - skipping\n",
+                Serial_printf("BankMgr: slot %d voice %u compiled index %u out of range - skipping\n",
                     slot, i, (unsigned)ci);
                 sample_data[si] = nullptr;
                 sample[si].MIDINOTE = 0xFF;
@@ -275,10 +276,8 @@ bool BankManager::load_bank_config_(int slot) {
             ? sampleStore.find_by_hash(slotcfg.sample_id) : nullptr;
 
         if (!entry) {
-            if (Serial) {
-                Serial.printf("BankMgr: slot %d voice %u sample_id 0x%08X not found in SampleStore - falling back to compiled\n",
-                    slot, i, slotcfg.sample_id);
-            }
+            Warn_printf("BankMgr: slot %d voice %u sample_id 0x%08X missing; using compiled sample\n",
+                slot, i, slotcfg.sample_id);
             // Assigned but unresolvable (e.g. a since-deleted sample): always
             // fall back to this voice's compiled-in sample - unconditional,
             // unlike the old opt-in fallback flag.
@@ -353,12 +352,12 @@ void BankManager::detect_single_bank_(int slot) {
     bank_slot_counts_[slot] = 0;
 
     if (!LittleFS.exists(path)) {
-        if (Serial) Serial.printf("BankMgr: slot %d @ %s  empty (no config file)\n", slot, path);
+        Serial_printf("BankMgr: slot %d @ %s  empty (no config file)\n", slot, path);
         return;
     }
 
     if (!load_bank_config_file_(bank_config_, path)) {
-        if (Serial) Serial.printf("BankMgr: slot %d @ %s  FAILED to load\n", slot, path);
+        Serial_printf("BankMgr: slot %d @ %s  FAILED to load\n", slot, path);
         return;
     }
 
@@ -367,7 +366,7 @@ void BankManager::detect_single_bank_(int slot) {
         if (bank_config_.slots[i].sample_id != 0) ++used;
     }
     if (used == 0) {
-        if (Serial) Serial.printf("BankMgr: slot %d @ %s  no samples assigned - treating as empty\n", slot, path);
+        Serial_printf("BankMgr: slot %d @ %s  no samples assigned - treating as empty\n", slot, path);
         return;
     }
 
@@ -376,7 +375,7 @@ void BankManager::detect_single_bank_(int slot) {
     bank_slot_counts_[slot] = used;
     bank_valid_[slot] = true;
 
-    if (Serial) Serial.printf("BankMgr: slot %d @ %s  VALID  name='%s' slots_used=%u\n",
+    Serial_printf("BankMgr: slot %d @ %s  VALID  name='%s' slots_used=%u\n",
         slot, path, bank_names_[slot], used);
 #else
     (void)slot;
@@ -410,14 +409,14 @@ void BankManager::refresh_bank(int slot) {
     if (!bank_valid_[slot]) {
         // The active bank's config just became invalid (e.g. emptied out) -
         // silence rather than risk playing back a half-applied config.
-        if (Serial) Serial.printf("BankMgr: active bank %d became invalid after refresh - silencing\n", slot);
+        Warn_printf("BankMgr: active bank %d became invalid after refresh - silencing\n", slot);
         silence_all_voices_();
         sw.finish_bank_transition();
         return;
     }
 
     load_bank_config_(slot);
-    if (Serial) Serial.printf("BankMgr: hot-reloaded active bank %d after live config upload\n", slot);
+    Serial_printf("BankMgr: hot-reloaded active bank %d after live config upload\n", slot);
     sw.finish_bank_transition();
 #else
     (void)slot;
@@ -426,9 +425,9 @@ void BankManager::refresh_bank(int slot) {
 
 #ifdef ENABLE_LITTLEFS
 void BankManager::debug_print_bank_detail(int slot) {
-    if (!Serial) return;
+    if (!FOUNDLING_SERIAL_CONNECTED) return;
     if (slot < 1 || slot > MAX_FLASH_BANKS) {
-        Serial.printf("BankMgr: slot %d out of range\n", slot);
+        Serial_printf("BankMgr: slot %d out of range\n", slot);
         return;
     }
 
@@ -436,18 +435,18 @@ void BankManager::debug_print_bank_detail(int slot) {
     snprintf(path, sizeof(path), BANK_CONFIG_SAVE_PATH_FMT, slot);
 
     if (!LittleFS.exists(path) || !load_bank_config_file_(bank_config_, path)) {
-        Serial.printf("  slot %d @ %s: empty\n", slot, path);
+        Serial_printf("  slot %d @ %s: empty\n", slot, path);
         return;
     }
 
-    Serial.printf("  slot %d @ %s: name='%s'\n", slot, path, bank_config_.bank_name);
+    Serial_printf("  slot %d @ %s: name='%s'\n", slot, path, bank_config_.bank_name);
     for (int i = 0; i < BANK_CONFIG_MAX_SLOTS; ++i) {
         const SlotConfig &sc = bank_config_.slots[i];
         if (sc.sample_id == 0) continue;
 
         if (sc.flags & BANK_CONFIG_SLOT_FLAG_COMPILED_INDEX) {
             uint32_t ci = sc.sample_id - 1;
-            Serial.printf("    [%2d] compiled voice #%u  note=%3u  vol=%3u%s\n",
+            Serial_printf("    [%2d] compiled voice #%u  note=%3u  vol=%3u%s\n",
                 i, (unsigned)ci, sc.midi_note, sc.volume,
                 (ci < compiled_num_voices_) ? "" : "  OUT OF RANGE");
             continue;
@@ -456,13 +455,13 @@ void BankManager::debug_print_bank_detail(int slot) {
         const SampleStoreEntryHeader *entry = sampleStore.is_valid()
             ? sampleStore.find_by_hash(sc.sample_id) : nullptr;
         if (!entry) {
-            Serial.printf("    [%2d] sample_id=0x%08X  NOT FOUND in SampleStore  vol=%3u note=%3u flags=0x%02X\n",
+            Serial_printf("    [%2d] sample_id=0x%08X  NOT FOUND in SampleStore  vol=%3u note=%3u flags=0x%02X\n",
                 i, sc.sample_id, sc.volume, sc.midi_note, sc.flags);
             continue;
         }
 
         float dur = entry->sample_rate > 0 ? (float)entry->num_samples / entry->sample_rate : 0.f;
-        Serial.printf("    [%2d] %-23s  note=%3u  vol=%3u  %5u Hz  %ub=%u (%.2fs)  id=0x%08X\n",
+        Serial_printf("    [%2d] %-23s  note=%3u  vol=%3u  %5u Hz  %ub=%u (%.2fs)  id=0x%08X\n",
             i, entry->name[0] ? entry->name : "(unnamed)",
             sc.midi_note, sc.volume, entry->sample_rate,
             entry->bit_depth, entry->num_samples, dur, sc.sample_id);

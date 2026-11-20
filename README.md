@@ -39,6 +39,44 @@ Connect over USB, open the web manager, and choose a **Playing bank** to change 
 
 On 16 MB firmware, you can also hold Switch DOWN while powering on to choose a bank and set the switch role without the web manager. Playback continues during setup.
 
+## Serial connection commands
+
+You can connect via serial (e.g. using Putty or Arduino Serial Monitor) to send commands and receive feedback from the Compulidian:-
+
+```
+Available commands:
+Parameter debug commands:
+  I            - stream parameter input info to console
+  d i <index>  - toggle debug on a parameter input
+Sample player commands:
+  s            - toggle sample interpolation on/off
+  c            - toggle calculate mode between main loop and audio worker
+  v            - toggle volume on/off
+Seqlib commands:
+  f            - toggle fills on/off
+  state        - dump controls, clock, pattern and held-note state
+  clock-state  - dump BPM, pulse/reset counts, queue losses and strict clock state
+Kit bank commands:
+  b            - print bank detection status
+  B <slot>     - switch to bank slot <slot>
+  l            - list track patterns and assigned voice samples
+  lx           - list track patterns and assigned voice samples (extended)
+  p <pattern>  - trigger named pattern
+  X            - send sysex config to host
+  y            - dump saveloadlib settings tree
+  Y            - dump sample store status
+Clock commands:
+  play         - start the clock
+  stop         - stop the clock
+  clock-internal       - set clock mode to internal
+  clock-external-cv    - set clock mode to external CV
+  clock-external-cv-ppqn <1|2|4|8|12|16|24> - set live CV PPQN (currently 1)
+  transitions       - (debug) show pulse input transitions
+  clock-external-usb   - set clock mode to external USB host
+  V            - dump version/build information
+  help         - show this help message
+```
+
 ## More information
 
 See [README-MORE.md](README-MORE.md) for detailed bank setup, clock and RESET options, web-manager workflows, diagnostics, serial commands, and build instructions. Hardware and driver notes are in [ComputerCard-notes.md](ComputerCard-notes.md).

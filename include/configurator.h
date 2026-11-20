@@ -1,5 +1,6 @@
 #pragma once
 
+#include "shared_debug.h"
 #include <Arduino.h>
 
 #include "settings.h"
@@ -207,7 +208,7 @@ static bool enqueue_pending_sysex(uint8_t action, uint8_t req_id, uint8_t arg = 
     const uint8_t next_head = (uint8_t)((pending_sysex_head + 1) % (sizeof(pending_sysex_queue) / sizeof(pending_sysex_queue[0])));
     if (next_head == pending_sysex_tail) {
         interrupts();
-        if (SYSEX_DEBUG && Serial) Serial.println("pending sysex queue full, dropping action");
+        if (SYSEX_DEBUG) Serial_println("pending sysex queue full, dropping action");
         return false;
     }
     pending_sysex_queue[pending_sysex_head].action = action;
@@ -273,16 +274,16 @@ static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const
         }
     }
     if (!tud_connected() || TinyUSBDevice.suspended()) {
-        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB host unavailable, dropping frame");
+        if (SYSEX_DEBUG) Serial_println("send_sysex_frame(): USB host unavailable, dropping frame");
         return false;
     }
     if (SYSEX_DEBUG && !TinyUSBDevice.mounted() && Serial) {
-        Serial.println("send_sysex_frame(): USB still reports unmounted, attempting send anyway");
+        Serial_println("send_sysex_frame(): USB still reports unmounted, attempting send anyway");
     }
 
     uint8_t buf[SYSEX_FRAME_BYTES + SYSEX_MAX_PAYLOAD];
     if (payload_len > sizeof(buf) - SYSEX_FRAME_BYTES) {
-        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): payload too large");
+        if (SYSEX_DEBUG) Serial_println("send_sysex_frame(): payload too large");
         return false;
     }
 
@@ -297,12 +298,12 @@ static bool send_sysex_frame(uint8_t type, uint8_t req_id, uint8_t status, const
         memcpy(buf + SYSEX_FRAME_BYTES, payload, payload_len);
     }
 
-    if (SYSEX_DEBUG && Serial) {
-        Serial.printf("sysex tx: type=0x%02X req=%u status=0x%02X payload=%u\n",
+    if (SYSEX_DEBUG) {
+        Serial_printf("sysex tx: type=0x%02X req=%u status=0x%02X payload=%u\n",
             type, req_id, status, payload_len);
     }
     if (!send_sysex_bytes_reliable_(buf, SYSEX_FRAME_BYTES + payload_len)) {
-        if (SYSEX_DEBUG && Serial) Serial.println("send_sysex_frame(): USB write failed (disconnected, suspended or FIFO congested)");
+        if (SYSEX_DEBUG) Serial_println("send_sysex_frame(): USB write failed (disconnected, suspended or FIFO congested)");
         return false;
     }
     return true;
@@ -323,7 +324,7 @@ static void process_pending_sysex_responses() {
         ++processed;
         if (item.action != PENDING_REBOOT_BOOTSEL
             && (!tud_connected() || TinyUSBDevice.suspended())) {
-            if (SYSEX_DEBUG && Serial) Serial.println("pending sysex: USB host unavailable, dropping response");
+            if (SYSEX_DEBUG) Serial_println("pending sysex: USB host unavailable, dropping response");
             continue;
         }
         switch (item.action) {
@@ -992,7 +993,7 @@ static bool build_config_payload(uint8_t *payload, uint16_t *payload_len) {
 }
 
 static void send_config_sysex(uint8_t req_id) {
-    if (SYSEX_DEBUG && Serial) Serial.printf("send_config_sysex() active_bank=%i req_id=%u\n", current_settings.active_bank, req_id);
+    if (SYSEX_DEBUG) Serial_printf("send_config_sysex() active_bank=%i req_id=%u\n", current_settings.active_bank, req_id);
     uint8_t payload[SYSEX_CONFIG_PAYLOAD_LEN];
     uint16_t payload_len = 0;
     if (!build_config_payload(payload, &payload_len)) {
@@ -1024,8 +1025,8 @@ static void handle_sysex(uint8_t *data, unsigned int size) {
     const uint8_t *d = m + 6;
     const unsigned payload_len = mlen - 6;
 
-    if (SYSEX_DEBUG && Serial) {
-        Serial.printf("sysex rx: ver=0x%02X type=0x%02X req=%u status=0x%02X payload=%u\n",
+    if (SYSEX_DEBUG) {
+        Serial_printf("sysex rx: ver=0x%02X type=0x%02X req=%u status=0x%02X payload=%u\n",
             ver, type, req_id, payload_status, payload_len);
     }
 

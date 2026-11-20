@@ -31,6 +31,8 @@ HARNESS = r"""
 
 #define Debug_printf(...) ((void)0)
 #define Debug_println(...) ((void)0)
+#define Serial_printf(...) Serial.printf(__VA_ARGS__)
+#define Serial_println(...) Serial.println(__VA_ARGS__)
 #define __not_in_flash_func(name) name
 #define MAX_OUTPUT_LABEL 40
 constexpr int8_t NOTE_OFF = -1;
